@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\AiLogController;
 use App\Http\Controllers\Admin\AiPricingController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\OverviewController as AdminOverviewController;
+use App\Http\Controllers\Admin\PaymentConnectionController;
 use App\Http\Controllers\Admin\ReconciliationController;
 use App\Http\Controllers\Admin\WalletAdjustmentController;
 use App\Http\Controllers\Admin\WhatsappLogController;
@@ -121,5 +122,9 @@ Route::prefix('admin')->group(function () {
         Route::get('/billing/reconciliation', [ReconciliationController::class, 'index']);
         Route::get('/wallet-adjustments', [WalletAdjustmentController::class, 'index']);
         Route::post('/clients/{company}/wallet-adjustments', [WalletAdjustmentController::class, 'store']);
+
+        Route::get('/payment/connection', [PaymentConnectionController::class, 'show']);
+        Route::put('/payment/connection', [PaymentConnectionController::class, 'update']);
+        Route::delete('/payment/connection', [PaymentConnectionController::class, 'destroy']);
     });
 });

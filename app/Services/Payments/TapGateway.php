@@ -4,6 +4,7 @@ namespace App\Services\Payments;
 
 use App\Contracts\PaymentGateway;
 use App\Models\Company;
+use App\Models\PlatformSetting;
 use App\Services\Billing\BillingEngine;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -31,19 +32,31 @@ class TapGateway implements PaymentGateway
 {
     public function __construct(private readonly BillingEngine $billing) {}
 
+    /**
+     * The admin enters this from the dashboard (Billing → Payment gateway) —
+     * it lives encrypted in platform_settings, not .env. TAP_SECRET_KEY
+     * still works as a fallback if someone prefers env-based config, but
+     * the DB value always wins when both are set (same pattern as the
+     * OpenRouter key — see AiGatewayService::apiKey()).
+     */
+    public function secretKey(): ?string
+    {
+        return PlatformSetting::get('tap_secret_key') ?: config('services.tap.secret_key');
+    }
+
     public function isConfigured(): bool
     {
-        return filled(config('services.tap.secret_key'));
+        return filled($this->secretKey());
     }
 
     public function createTopupSession(Company $company, float $amount, string $currency): string
     {
         if (! $this->isConfigured()) {
-            throw new RuntimeException('Tap Payments is not configured — set TAP_SECRET_KEY in .env.');
+            throw new RuntimeException('Tap Payments is not configured — add the API key in the admin dashboard first.');
         }
 
         try {
-            $response = Http::withToken(config('services.tap.secret_key'))
+            $response = Http::withToken($this->secretKey())
                 ->timeout(30)
                 ->post('https://api.tap.company/v2/charges', [
                     'amount' => round($amount, 2),
@@ -115,7 +128,7 @@ class TapGateway implements PaymentGateway
      */
     private function verifySignature(array $payload, string $hashstring): bool
     {
-        if (blank($hashstring) || blank(config('services.tap.secret_key'))) {
+        if (blank($hashstring) || blank($this->secretKey())) {
             return false;
         }
 
@@ -127,7 +140,7 @@ class TapGateway implements PaymentGateway
             .'x_status'.($payload['status'] ?? '')
             .'x_created'.($payload['transaction']['created'] ?? '');
 
-        $expected = hash_hmac('sha256', $toHash, config('services.tap.secret_key'));
+        $expected = hash_hmac('sha256', $toHash, $this->secretKey());
 
         return hash_equals($expected, $hashstring);
     }
