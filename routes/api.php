@@ -33,6 +33,7 @@ use Illuminate\Support\Facades\Route;
 */
 Route::prefix('v1')->middleware(['api-key', 'throttle:60,1'])->group(function () {
     Route::get('/balance', [GatewayBalanceController::class, 'show']);
+    Route::get('/models', [GatewayAiController::class, 'models']);
     Route::post('/ai/chat', [GatewayAiController::class, 'chat']);
     Route::post('/whatsapp/send', [GatewayWhatsAppController::class, 'send']);
 });
@@ -71,6 +72,7 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
     Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);
     Route::get('/services/ai', [ServiceController::class, 'ai']);
+    Route::get('/services/ai/models', [ServiceController::class, 'aiModels']);
     Route::post('/services/ai/chat', [ServiceController::class, 'chatAi']);
 
     Route::get('/api-keys', [ApiKeyController::class, 'index']);
@@ -103,6 +105,7 @@ Route::prefix('admin')->group(function () {
         Route::put('/whatsapp/pricing', [WhatsappPricingController::class, 'update']);
         Route::get('/whatsapp/logs', [WhatsappLogController::class, 'index']);
 
+        Route::get('/ai/models', [AiPricingController::class, 'models']);
         Route::get('/ai/pricing', [AiPricingController::class, 'show']);
         Route::put('/ai/pricing', [AiPricingController::class, 'update']);
         Route::get('/ai/logs', [AiLogController::class, 'index']);

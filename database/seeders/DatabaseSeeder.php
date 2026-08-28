@@ -42,6 +42,8 @@ class DatabaseSeeder extends Seeder
             'model_overrides' => [
                 'openai/gpt-4o' => 3,
                 'openai/gpt-4o-mini' => 8,
+                'mistralai/mistral-nemo' => 10, // cheapest on OpenRouter — high multiplier still nets pennies for the client
+                'meta-llama/llama-3.1-8b-instruct' => 10,
             ],
             'token_to_currency_rate' => 1.0,
         ]);

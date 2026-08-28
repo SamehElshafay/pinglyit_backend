@@ -93,6 +93,49 @@ class AiGatewayService
     }
 
     /**
+     * A starting menu for the admin's "add a per-model override" picker —
+     * real OpenRouter model ids, picked for being either cheap or well-known
+     * (checked against OpenRouter's live pricing on 2026-08-28). Not
+     * exhaustive — OpenRouter lists ~400 models; admin can still type a
+     * different id by hand. Adding a model here doesn't make it billable on
+     * its own — it still needs a multiplier set on the pricing screen.
+     *
+     * @return array<int, array{id: string, name: string}>
+     */
+    public function suggestedModels(): array
+    {
+        return [
+            ['id' => 'mistralai/mistral-nemo', 'name' => 'Mistral Nemo (cheapest)'],
+            ['id' => 'meta-llama/llama-3.1-8b-instruct', 'name' => 'Llama 3.1 8B Instruct'],
+            ['id' => 'mistralai/mistral-small-24b-instruct-2501', 'name' => 'Mistral Small 24B'],
+            ['id' => 'openai/gpt-oss-20b', 'name' => 'GPT-OSS 20B'],
+            ['id' => 'google/gemma-3-4b-it', 'name' => 'Gemma 3 4B'],
+            ['id' => 'openai/gpt-4o-mini', 'name' => 'GPT-4o Mini'],
+            ['id' => 'openai/gpt-4o', 'name' => 'GPT-4o'],
+            ['id' => 'anthropic/claude-3.5-sonnet', 'name' => 'Claude 3.5 Sonnet'],
+        ];
+    }
+
+    /**
+     * What a client is actually allowed to pick from — the models the admin
+     * has priced for this client (their own override if they have one, else
+     * the platform default's list). Not the full OpenRouter catalog: a
+     * client only sees models Pingly has actually set a rate for.
+     *
+     * @return array<int, array{id: string, name: string}>
+     */
+    public function availableModelsFor(Company $company): array
+    {
+        $overrides = $this->pricingFor($company)['model_overrides'] ?? [];
+        $names = collect($this->suggestedModels())->keyBy('id');
+
+        return collect(array_keys($overrides))
+            ->map(fn (string $id) => ['id' => $id, 'name' => $names->get($id)['name'] ?? $id])
+            ->values()
+            ->all();
+    }
+
+    /**
      * Forward a request to OpenRouter, bill it, return the completion.
      * Real cost can only be known after OpenRouter responds with actual
      * token usage — so the only pre-flight check possible is "is the

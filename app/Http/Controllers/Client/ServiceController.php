@@ -60,6 +60,16 @@ class ServiceController extends Controller
     }
 
     /**
+     * The models this client can actually pick — whatever the admin has
+     * priced for them, not the full OpenRouter catalog. Powers the model
+     * Select on the dashboard's "try a request" box.
+     */
+    public function aiModels(Request $request)
+    {
+        return response()->json($this->ai->availableModelsFor($request->user()->company));
+    }
+
+    /**
      * Send one WhatsApp message through the gateway — this is the actual
      * "use the service" endpoint, as opposed to whatsapp() above which
      * just reports on past usage.

@@ -4,12 +4,22 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
+use App\Services\Ai\AiGatewayService;
 use App\Services\Billing\ServiceConfigRepository;
 use Illuminate\Http\Request;
 
 class AiPricingController extends Controller
 {
-    public function __construct(private readonly ServiceConfigRepository $configs) {}
+    public function __construct(
+        private readonly ServiceConfigRepository $configs,
+        private readonly AiGatewayService $ai,
+    ) {}
+
+    /** Starting menu for the "add a per-model override" picker. */
+    public function models()
+    {
+        return response()->json($this->ai->suggestedModels());
+    }
 
     public function show()
     {

@@ -16,6 +16,12 @@ class AiController extends Controller
 {
     public function __construct(private readonly AiGatewayService $ai) {}
 
+    /** GET /v1/models — what this key's company is priced for and can call. */
+    public function models(Request $request)
+    {
+        return response()->json($this->ai->availableModelsFor($request->attributes->get('company')));
+    }
+
     public function chat(Request $request)
     {
         $data = $request->validate([
