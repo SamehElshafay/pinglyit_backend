@@ -46,8 +46,10 @@ class ServiceController extends Controller
     {
         $company = $request->user()->company;
 
+        // Deliberately no multiplier here — the client sees tokens/credits
+        // used and their balance, never the internal rate they're billed at.
         return response()->json([
-            'multiplier' => $this->ai->multiplierFor($company),
+            'balance' => (float) ($company->wallet->balance ?? 0),
             'usage' => $company->usageEvents()->where('service_type', ServiceType::Ai)->latest()->limit(25)->get()
                 ->map(fn ($e) => [
                     'time' => $e->created_at,

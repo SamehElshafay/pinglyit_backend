@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
 use Stripe\Checkout\Session;
+use Stripe\Exception\ApiConnectionException;
+use Stripe\Exception\ApiErrorException;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\Stripe;
 use Stripe\Webhook;
@@ -34,22 +36,28 @@ class StripeGateway implements PaymentGateway
 
         Stripe::setApiKey(config('services.stripe.secret'));
 
-        $session = Session::create([
-            'mode' => 'payment',
-            'payment_method_types' => ['card'],
-            'line_items' => [[
-                'price_data' => [
-                    'currency' => strtolower($currency),
-                    'product_data' => ['name' => 'Pingly wallet top-up'],
-                    'unit_amount' => (int) round($amount * 100), // Stripe wants the smallest currency unit
-                ],
-                'quantity' => 1,
-            ]],
-            'client_reference_id' => (string) $company->id,
-            'metadata' => ['company_id' => $company->id],
-            'success_url' => config('pingly.frontend_url').'/wallet?topup=success',
-            'cancel_url' => config('pingly.frontend_url').'/wallet?topup=cancelled',
-        ]);
+        try {
+            $session = Session::create([
+                'mode' => 'payment',
+                'payment_method_types' => ['card'],
+                'line_items' => [[
+                    'price_data' => [
+                        'currency' => strtolower($currency),
+                        'product_data' => ['name' => 'Pingly wallet top-up'],
+                        'unit_amount' => (int) round($amount * 100), // Stripe wants the smallest currency unit
+                    ],
+                    'quantity' => 1,
+                ]],
+                'client_reference_id' => (string) $company->id,
+                'metadata' => ['company_id' => $company->id],
+                'success_url' => config('pingly.frontend_url').'/wallet?topup=success',
+                'cancel_url' => config('pingly.frontend_url').'/wallet?topup=cancelled',
+            ]);
+        } catch (ApiConnectionException $e) {
+            throw new \RuntimeException("Couldn't reach Stripe: {$e->getMessage()}");
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException("Stripe rejected the request: {$e->getMessage()}");
+        }
 
         return $session->url;
     }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AiConnectionController;
 use App\Http\Controllers\Admin\AiLogController;
 use App\Http\Controllers\Admin\AiPricingController;
 use App\Http\Controllers\Admin\ClientController;
@@ -15,9 +16,26 @@ use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ServiceController;
 use App\Http\Controllers\Client\WalletController;
+use App\Http\Controllers\Gateway\AiController as GatewayAiController;
+use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
+use App\Http\Controllers\Gateway\WhatsAppController as GatewayWhatsAppController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\Webhooks\WhatsappWebhookController;
 use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| Public gateway API (/v1) — this is the actual product: a client's own
+| project calls this directly with the pk_live_ key it created on the API
+| keys screen. Nothing to do with logging a person into a dashboard — see
+| AuthenticateApiKey. Every call here debits the caller's own wallet.
+|--------------------------------------------------------------------------
+*/
+Route::prefix('v1')->middleware(['api-key', 'throttle:60,1'])->group(function () {
+    Route::get('/balance', [GatewayBalanceController::class, 'show']);
+    Route::post('/ai/chat', [GatewayAiController::class, 'chat']);
+    Route::post('/whatsapp/send', [GatewayWhatsAppController::class, 'send']);
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -88,6 +106,9 @@ Route::prefix('admin')->group(function () {
         Route::get('/ai/pricing', [AiPricingController::class, 'show']);
         Route::put('/ai/pricing', [AiPricingController::class, 'update']);
         Route::get('/ai/logs', [AiLogController::class, 'index']);
+        Route::get('/ai/connection', [AiConnectionController::class, 'show']);
+        Route::put('/ai/connection', [AiConnectionController::class, 'update']);
+        Route::delete('/ai/connection', [AiConnectionController::class, 'destroy']);
 
         Route::get('/billing/reconciliation', [ReconciliationController::class, 'index']);
         Route::get('/wallet-adjustments', [WalletAdjustmentController::class, 'index']);

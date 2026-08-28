@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Models\Company;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -113,12 +114,16 @@ class WhatsAppGatewayService
         }
 
         $apiVersion = config('pingly.whatsapp.api_version');
-        $response = Http::withToken(config('pingly.whatsapp.access_token'))
-            ->timeout(30)
-            ->post("https://graph.facebook.com/{$apiVersion}/{$account->phone_number_id}/messages", array_merge([
-                'messaging_product' => 'whatsapp',
-                'to' => $to,
-            ], $payload));
+        try {
+            $response = Http::withToken(config('pingly.whatsapp.access_token'))
+                ->timeout(30)
+                ->post("https://graph.facebook.com/{$apiVersion}/{$account->phone_number_id}/messages", array_merge([
+                    'messaging_product' => 'whatsapp',
+                    'to' => $to,
+                ], $payload));
+        } catch (ConnectionException $e) {
+            throw new RuntimeException("Couldn't reach Meta's Cloud API: {$e->getMessage()}");
+        }
 
         if ($response->failed()) {
             throw new RuntimeException('Meta Cloud API error: '.$response->body());

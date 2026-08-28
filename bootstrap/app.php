@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\AuthenticateJwt;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureClient;
@@ -20,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'jwt' => AuthenticateJwt::class,
             'admin' => EnsureAdmin::class,
             'client' => EnsureClient::class,
+            'api-key' => AuthenticateApiKey::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

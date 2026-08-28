@@ -4,10 +4,13 @@ namespace App\Services\Ai;
 
 use App\Enums\ServiceType;
 use App\Models\Company;
+use App\Models\PlatformSetting;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -38,9 +41,20 @@ class AiGatewayService
         private readonly ServiceConfigRepository $configs,
     ) {}
 
+    /**
+     * The admin enters this from the dashboard (AI Gateway → connection) —
+     * it lives encrypted in platform_settings, not .env. OPENROUTER_API_KEY
+     * still works as a fallback if someone prefers env-based config, but
+     * the DB value always wins when both are set.
+     */
+    public function apiKey(): ?string
+    {
+        return PlatformSetting::get('openrouter_api_key') ?: config('pingly.ai.openrouter_api_key');
+    }
+
     public function isConfigured(): bool
     {
-        return filled(config('pingly.ai.openrouter_api_key'));
+        return filled($this->apiKey());
     }
 
     public function isEnabledFor(Company $company): bool
@@ -90,19 +104,23 @@ class AiGatewayService
     public function forward(Company $company, string $model, array $messages): array
     {
         if (! $this->isConfigured()) {
-            throw new RuntimeException('AI Gateway is not configured — set OPENROUTER_API_KEY in .env.');
+            throw new RuntimeException('AI Gateway is not configured — add the OpenRouter key in the admin dashboard first.');
         }
 
         if (! $this->billing->hasSufficientBalance($company, 0.000001)) {
             throw new RuntimeException('Wallet balance is empty — top up before making AI requests.');
         }
 
-        $response = Http::withToken(config('pingly.ai.openrouter_api_key'))
-            ->timeout(60)
-            ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', [
-                'model' => $model,
-                'messages' => $messages,
-            ]);
+        try {
+            $response = Http::withToken($this->apiKey())
+                ->timeout(60)
+                ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', [
+                    'model' => $model,
+                    'messages' => $messages,
+                ]);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException("Couldn't reach OpenRouter: {$e->getMessage()}");
+        }
 
         if ($response->failed()) {
             throw new RuntimeException('OpenRouter request failed: '.$response->body());
@@ -127,9 +145,19 @@ class AiGatewayService
      */
     private function estimateRealCost(string $model, array $usage): float
     {
+        // The completion above already happened — a failure here shouldn't
+        // turn into a 500 after the client already got their answer. Worst
+        // case this one request is costed at $0 and shows up for review in
+        // the admin's AI logs (real_cost = 0 is easy to spot there).
         $pricing = Cache::remember("openrouter_pricing:{$model}", 3600, function () use ($model) {
-            $response = Http::withToken(config('pingly.ai.openrouter_api_key'))
-                ->get(config('pingly.ai.openrouter_api_base').'/models');
+            try {
+                $response = Http::withToken($this->apiKey())
+                    ->get(config('pingly.ai.openrouter_api_base').'/models');
+            } catch (ConnectionException $e) {
+                Log::warning('OpenRouter pricing lookup failed', ['model' => $model, 'error' => $e->getMessage()]);
+
+                return ['prompt' => 0, 'completion' => 0];
+            }
 
             $found = collect($response->json('data', []))->firstWhere('id', $model);
 
