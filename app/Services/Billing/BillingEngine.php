@@ -106,9 +106,42 @@ class BillingEngine
     }
 
     /**
-     * Credit a real-money top-up (Stripe or whatever gateway is active).
-     * Idempotent on `providerReference` — a webhook retry for the same
-     * Stripe session/charge id will not double-credit the wallet.
+     * Record a top-up as pending *before* the charge happens, with an
+     * amount Pingly itself decided (not anything a gateway will later
+     * report). Exists for gateways whose webhook can't be fully trusted to
+     * echo back what was actually requested (see PaymobGateway::
+     * createTopupSession()'s docblock — its `extras` field, despite the
+     * docs, does not survive into the webhook at all, confirmed live
+     * 2026-08-28). `providerReference` must be something *we* generate and
+     * control (e.g. Paymob's `special_reference`), not the gateway's own
+     * transaction id, since that isn't known until the webhook fires.
+     */
+    public function recordPendingTopup(Company $company, float $amount, string $currency, string $provider, string $providerReference): WalletTopup
+    {
+        return WalletTopup::create([
+            'company_id' => $company->id,
+            'provider' => $provider,
+            'provider_reference' => $providerReference,
+            'amount' => $amount,
+            'currency' => $currency,
+            'status' => 'pending',
+        ]);
+    }
+
+    /**
+     * Credit a real-money top-up (Stripe, Tap, Paymob — whatever gateway is
+     * active). Idempotent on `providerReference` — a webhook retry for the
+     * same reference will not double-credit the wallet.
+     *
+     * The amount actually credited always comes from the WalletTopup row's
+     * own stored `amount`, never the `$amount` parameter directly — for a
+     * gateway that never pre-records one (Stripe/Tap: no existing row, so
+     * firstOrCreate makes one right here from $amount/$currency), that's
+     * the same value either way. For one that does (Paymob: see
+     * recordPendingTopup()), the row's already-stored, Pingly-decided
+     * amount wins over anything the gateway's webhook claims — the
+     * $amount/$currency arguments are then just what the caller *thinks*
+     * it should be, used only if no pending row already exists.
      */
     public function creditTopup(Company $company, float $amount, string $currency, string $provider, string $providerReference): WalletTopup
     {
@@ -122,7 +155,7 @@ class BillingEngine
                 return $topup; // already credited — webhook fired more than once
             }
 
-            $company->wallet()->lockForUpdate()->increment('balance', $amount);
+            $company->wallet()->lockForUpdate()->increment('balance', $topup->amount);
             $topup->update(['status' => 'completed']);
 
             return $topup;

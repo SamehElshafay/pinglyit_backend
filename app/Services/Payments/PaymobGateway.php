@@ -5,6 +5,7 @@ namespace App\Services\Payments;
 use App\Contracts\PaymentGateway;
 use App\Models\Company;
 use App\Models\PlatformSetting;
+use App\Models\WalletTopup;
 use App\Services\Billing\BillingEngine;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
@@ -28,14 +29,15 @@ use RuntimeException;
  * the browser alone — same rule as Stripe/Tap.
  *
  * Verified against Paymob's public developer docs and an independent
- * community SDK before writing this, then against a real test-mode charge
- * (2026-08-28) — that live attempt is what caught `billing_data` actually
- * being required (the docs call it optional; it isn't — see
- * billingDataFor()). Everything else — the request/response shape, the
- * `/unifiedcheckout` URL format, the HMAC field list — matched on the
- * first try. The one thing still genuinely unconfirmed: the exact string
- * form Paymob uses for a boolean in the HMAC concatenation (see
- * verifySignature()) — that only surfaces once a real webhook fires.
+ * community SDK before writing this, then against real test-mode charges
+ * (2026-08-28) — those live attempts caught two things the docs got wrong:
+ * `billing_data` is required, not optional (see billingDataFor()), and
+ * `extras` does NOT survive into the webhook callback at all, despite the
+ * docs explicitly saying it does. That second one is why the wallet is
+ * never credited from anything the webhook reports about the amount — see
+ * recordPendingTopup() below and BillingEngine::creditTopup()'s docblock.
+ * The one thing still genuinely unconfirmed: the exact string form Paymob
+ * uses for a boolean in the HMAC concatenation (see verifySignature()).
  */
 class PaymobGateway implements PaymentGateway
 {
@@ -79,10 +81,12 @@ class PaymobGateway implements PaymentGateway
      * bigger change than this gateway needs. So the conversion happens only
      * here, at the charge boundary: the card gets charged in EGP at this
      * rate, but the wallet is credited the exact USD amount the client
-     * actually asked for (stored in `extras`, not re-derived from the EGP
-     * figure that comes back — see handleWebhook()). Admin-set, not fetched
-     * live, so it never silently drifts without someone choosing a value —
-     * update it here whenever the real rate moves meaningfully.
+     * actually asked for — recorded by Pingly itself *before* the charge
+     * happens (see recordPendingTopup()), never re-derived from anything
+     * the webhook reports (confirmed live: it can't be — see the class
+     * docblock). Admin-set, not fetched live, so it never silently drifts
+     * without someone choosing a value — update it here whenever the real
+     * rate moves meaningfully.
      */
     public function usdToEgpRate(): ?float
     {
@@ -114,6 +118,13 @@ class PaymobGateway implements PaymentGateway
         $egpAmount = round($amount * $this->usdToEgpRate(), 2);
         $base = rtrim(config('pingly.paymob.api_base'), '/');
 
+        // Ours, not Paymob's — this is the key handleWebhook() looks the
+        // pending top-up back up by. Must be unique per attempt (the
+        // timestamp does that) and must not collide across companies (the
+        // leading company id does that, though it's no longer parsed back
+        // out of this string — the WalletTopup row itself carries company_id).
+        $reference = (string) $company->id.'-'.now()->timestamp;
+
         try {
             $response = Http::withToken($this->secretKey(), 'Token')
                 ->timeout(30)
@@ -122,16 +133,11 @@ class PaymobGateway implements PaymentGateway
                     'currency' => 'EGP', // fixed by the Integration ID, not by the caller — see usdToEgpRate()
                     'payment_methods' => [(int) $this->integrationId()],
                     'billing_data' => $this->billingDataFor($company),
-                    'special_reference' => (string) $company->id.'-'.now()->timestamp,
-                    'extras' => [
-                        'company_id' => $company->id,
-                        // The wallet gets credited this exact figure on success — never
-                        // re-derived from amount_cents/currency in the webhook, so a
-                        // stale rate or EGP rounding never changes what the client's
-                        // wallet actually receives versus what they were shown.
-                        'requested_amount' => $amount,
-                        'requested_currency' => 'USD',
-                    ],
+                    'special_reference' => $reference,
+                    // Kept as a cheap, harmless secondary signal even though it's
+                    // not been observed to survive into the webhook on this
+                    // account (see class docblock) — costs nothing to send.
+                    'extras' => ['company_id' => $company->id],
                     'notification_url' => config('app.url').'/api/webhooks/paymob',
                     'redirection_url' => config('pingly.frontend_url').'/wallet?topup=success',
                 ]);
@@ -148,6 +154,11 @@ class PaymobGateway implements PaymentGateway
         if (! $clientSecret) {
             throw new RuntimeException('Paymob did not return a client_secret: '.$response->body());
         }
+
+        // Recorded *before* the customer even sees a card form — the amount
+        // the wallet gets credited is decided here, by Pingly, once, and
+        // never touched again regardless of what the webhook later reports.
+        $this->billing->recordPendingTopup($company, $amount, 'USD', 'paymob', $reference);
 
         return "{$base}/unifiedcheckout/?publicKey={$this->publicKey()}&clientSecret={$clientSecret}";
     }
@@ -203,23 +214,35 @@ class PaymobGateway implements PaymentGateway
         $pending = ($obj['pending'] ?? true) === true;
 
         if ($success && ! $pending) {
-            $extras = $obj['extras'] ?? [];
-            $companyId = $extras['company_id'] ?? null;
-            $company = $companyId ? Company::find($companyId) : null;
+            // `special_reference` (see createTopupSession()) round-trips as
+            // `merchant_order_id` on the order — confirmed live, this is the
+            // one field that reliably comes back. Looking the WalletTopup
+            // row up by it (not parsing anything out of it) means the
+            // amount/currency/company all come from what Pingly itself
+            // recorded before the charge, never from this webhook — see
+            // BillingEngine::creditTopup()'s docblock.
+            $reference = $obj['order']['merchant_order_id'] ?? $obj['merchant_order_id'] ?? null;
+            $topup = $reference
+                ? WalletTopup::where('provider', 'paymob')->where('provider_reference', $reference)->first()
+                : null;
 
-            if ($company) {
-                // Credit the USD amount the client actually requested (see
-                // createTopupSession()'s docblock) — not amount_cents/currency,
-                // which is the EGP figure the card was actually charged.
+            if ($topup) {
                 $this->billing->creditTopup(
-                    company: $company,
-                    amount: (float) ($extras['requested_amount'] ?? ((int) ($obj['amount_cents'] ?? 0)) / 100),
-                    currency: strtoupper($extras['requested_currency'] ?? $obj['currency'] ?? 'EGP'),
+                    company: $topup->company,
+                    amount: (float) $topup->amount,
+                    currency: $topup->currency,
                     provider: 'paymob',
-                    providerReference: (string) ($obj['id'] ?? $obj['order']['id'] ?? ''),
+                    providerReference: $reference,
                 );
             } else {
-                Log::warning('Paymob successful-transaction webhook with no resolvable company', ['id' => $obj['id'] ?? null]);
+                // Logs the full payload, not just the id — if this ever
+                // fires, it means even merchant_order_id didn't survive,
+                // which would need real ground truth to fix, not a guess.
+                Log::warning('Paymob successful-transaction webhook with no matching pending top-up', [
+                    'id' => $obj['id'] ?? null,
+                    'merchant_order_id' => $reference,
+                    'payload' => $payload,
+                ]);
             }
         }
 
