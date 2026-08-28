@@ -151,9 +151,18 @@ class AiGatewayService
      * wallet not already empty", not an exact estimate (docs §4.4's flow:
      * send → real usage/cost comes back → then bill).
      *
+     * Pingly is a pure relay for tool/function calling — never an executor.
+     * `$options['tools']` (and `tool_choice`) pass straight through to
+     * OpenRouter untouched; if the model responds with a tool_call, that
+     * comes straight back in `choices` for the *client's own app* to run
+     * and feed back in a follow-up call. This billing path already handles
+     * that correctly with zero changes: it bills whatever real usage
+     * OpenRouter reports, whether that's a plain reply or a tool_call.
+     *
      * @param  array<int, array<string, string>>  $messages
+     * @param  array<string, mixed>  $options  only 'tools' / 'tool_choice' are passed through today
      */
-    public function forward(Company $company, string $model, array $messages): array
+    public function forward(Company $company, string $model, array $messages, array $options = []): array
     {
         if (! $this->isConfigured()) {
             throw new RuntimeException('AI Gateway is not configured — add the OpenRouter key in the admin dashboard first.');
@@ -163,13 +172,17 @@ class AiGatewayService
             throw new RuntimeException('Wallet balance is empty — top up before making AI requests.');
         }
 
+        $body = array_filter([
+            'model' => $model,
+            'messages' => $messages,
+            'tools' => $options['tools'] ?? null,
+            'tool_choice' => $options['tool_choice'] ?? null,
+        ], fn ($v) => $v !== null);
+
         try {
             $response = Http::withToken($this->apiKey())
                 ->timeout(60)
-                ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', [
-                    'model' => $model,
-                    'messages' => $messages,
-                ]);
+                ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', $body);
         } catch (ConnectionException $e) {
             throw new RuntimeException("Couldn't reach OpenRouter: {$e->getMessage()}");
         }

@@ -27,8 +27,15 @@ class AiController extends Controller
         $data = $request->validate([
             'model' => ['required', 'string'],
             'messages' => ['required', 'array', 'min:1'],
-            'messages.*.role' => ['required', 'string', 'in:system,user,assistant'],
-            'messages.*.content' => ['required', 'string'],
+            // 'tool' role + tool_call_id/tool_calls/name cover sending a tool's
+            // result back in a follow-up call — see the class docblock.
+            'messages.*.role' => ['required', 'string', 'in:system,user,assistant,tool'],
+            'messages.*.content' => ['nullable', 'string'],
+            'messages.*.tool_calls' => ['sometimes', 'array'],
+            'messages.*.tool_call_id' => ['sometimes', 'string'],
+            'messages.*.name' => ['sometimes', 'string'],
+            'tools' => ['sometimes', 'array'],
+            'tool_choice' => ['sometimes'],
         ]);
 
         $company = $request->attributes->get('company');
@@ -38,7 +45,10 @@ class AiController extends Controller
         }
 
         try {
-            $result = $this->ai->forward($company, $data['model'], $data['messages']);
+            $result = $this->ai->forward($company, $data['model'], $data['messages'], [
+                'tools' => $data['tools'] ?? null,
+                'tool_choice' => $data['tool_choice'] ?? null,
+            ]);
         } catch (RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
