@@ -25,10 +25,17 @@ use RuntimeException;
  *                                        // anymore) — pricier models get a lower
  *                                        // multiplier, cheap ones a higher one, since a
  *                                        // flat rate under- or over-charges at the extremes.
- *     'token_to_currency_rate' => 1.0,   // docs §4.7 open decision: how a
- *                                        // billed token maps to wallet currency.
- *                                        // 1.0 = a token *is* the credit unit.
  *   ]
+ *
+ * The wallet is real USD (Stripe top-ups charge real dollars 1:1 into it —
+ * see StripeGateway), so billing is real_cost_usd × multiplier, full stop.
+ * `billed_tokens` (real_tokens × multiplier) exists only as a display number
+ * in usage history — it is never itself multiplied into a dollar amount.
+ * (A v1 of this file did exactly that via a `token_to_currency_rate` at
+ * 1.0 — i.e. billed 1 "token" as $1 — which is how two three-cent test
+ * messages emptied $300 out of a wallet. Removed; don't reintroduce a
+ * token→dollar rate without checking it against real per-token pricing
+ * first, which sits around $0.0000001–0.00003/token on OpenRouter.)
  *
  * A per-client override (docs §2.1, e.g. "Client X = 4x") stays a single
  * flat multiplier that ignores model — it's a blanket override, not a
@@ -77,7 +84,6 @@ class AiGatewayService
         return array_merge([
             'multiplier' => config('pingly.ai.default_multiplier'),
             'model_overrides' => [],
-            'token_to_currency_rate' => 1.0,
         ], $pricing);
     }
 
@@ -216,10 +222,9 @@ class AiGatewayService
 
     public function recordCompletion(Company $company, string $model, int $realTokens, float $realCostUsd): void
     {
-        $pricing = $this->pricingFor($company);
         $multiplier = $this->multiplierFor($company, $model);
-        $billedTokens = $realTokens * $multiplier;
-        $billedAmount = round($billedTokens * (float) $pricing['token_to_currency_rate'], 6);
+        $billedTokens = $realTokens * $multiplier; // display-only — never itself converted to dollars
+        $billedAmount = round($realCostUsd * $multiplier, 6); // the actual wallet debit: real $ × margin
 
         $this->billing->recordUsage(
             company: $company,
