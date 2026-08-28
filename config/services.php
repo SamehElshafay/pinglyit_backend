@@ -59,6 +59,14 @@ return [
         'secret_key' => env('PAYMOB_SECRET_KEY'),
         'public_key' => env('PAYMOB_PUBLIC_KEY'),
         'hmac_secret' => env('PAYMOB_HMAC_SECRET'),
+        // The numeric Integration ID for the "Online Card" method (dashboard →
+        // Developers → Payment Integrations) — account-specific, not a secret,
+        // but still admin-managed for the same reason the keys above are.
+        'integration_id' => env('PAYMOB_INTEGRATION_ID'),
+        // This account's Integration ID is fixed to EGP, but the wallet is
+        // USD — see PaymobGateway::usdToEgpRate()'s docblock for why the
+        // conversion happens only at this one boundary, admin-set here.
+        'usd_to_egp_rate' => env('PAYMOB_USD_TO_EGP_RATE'),
     ],
 
 ];

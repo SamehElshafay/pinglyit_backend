@@ -32,14 +32,16 @@ class PaymobConnectionTest extends TestCase
 
         $this->withToken($token)->putJson('/api/admin/paymob/connection', ['paymob_public_key' => 'pk_test_abcdef'])
             ->assertOk()
-            ->assertJson(['configured' => false]); // still missing secret + hmac
+            ->assertJson(['configured' => false]); // still missing secret + hmac + integration_id + rate
 
         $response = $this->withToken($token)->putJson('/api/admin/paymob/connection', [
             'paymob_secret_key' => 'sk_test_abcdef',
             'paymob_hmac_secret' => 'hmac_test_abcdef',
+            'paymob_integration_id' => '987654',
+            'paymob_usd_to_egp_rate' => '49.5',
         ]);
 
-        $response->assertOk()->assertJson(['configured' => true]);
+        $response->assertOk()->assertJson(['configured' => true, 'integration_id' => '987654', 'usd_to_egp_rate' => 49.5]);
         $this->assertStringEndsWith('cdef', $response->json('public_key.preview'));
         $this->assertEquals('pk_test_abcdef', PlatformSetting::get('paymob_public_key'));
         $this->assertEquals('sk_test_abcdef', PlatformSetting::get('paymob_secret_key'));
@@ -60,13 +62,15 @@ class PaymobConnectionTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_destroy_clears_all_three_keys(): void
+    public function test_destroy_clears_all_keys(): void
     {
         $token = $this->adminToken();
         $this->withToken($token)->putJson('/api/admin/paymob/connection', [
             'paymob_public_key' => 'pk_test_abcdef',
             'paymob_secret_key' => 'sk_test_abcdef',
             'paymob_hmac_secret' => 'hmac_test_abcdef',
+            'paymob_integration_id' => '987654',
+            'paymob_usd_to_egp_rate' => '49.5',
         ]);
 
         $this->withToken($token)->deleteJson('/api/admin/paymob/connection')
@@ -76,6 +80,15 @@ class PaymobConnectionTest extends TestCase
         $this->assertNull(PlatformSetting::get('paymob_public_key'));
         $this->assertNull(PlatformSetting::get('paymob_secret_key'));
         $this->assertNull(PlatformSetting::get('paymob_hmac_secret'));
+        $this->assertNull(PlatformSetting::get('paymob_integration_id'));
+        $this->assertNull(PlatformSetting::get('paymob_usd_to_egp_rate'));
+    }
+
+    public function test_update_rejects_an_invalid_rate(): void
+    {
+        $this->withToken($this->adminToken())
+            ->putJson('/api/admin/paymob/connection', ['paymob_usd_to_egp_rate' => 'not-a-number'])
+            ->assertStatus(422);
     }
 
     public function test_connection_routes_require_admin_auth(): void

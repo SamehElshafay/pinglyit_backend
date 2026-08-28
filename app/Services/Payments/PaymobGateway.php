@@ -28,14 +28,14 @@ use RuntimeException;
  * the browser alone — same rule as Stripe/Tap.
  *
  * Verified against Paymob's public developer docs and an independent
- * community SDK (not a real sandbox charge — that needs the merchant
- * account to finish review first): the request/response shape, the
- * `/unifiedcheckout` URL format, and the HMAC field list all matched
- * across both sources, which is more corroboration than Tap's integration
- * had. Still worth confirming against the first real test charge —
- * particularly whether `billing_data` turns out to be required despite the
- * docs calling it optional, and the exact string form Paymob uses for a
- * boolean in the HMAC concatenation (see verifySignature()).
+ * community SDK before writing this, then against a real test-mode charge
+ * (2026-08-28) — that live attempt is what caught `billing_data` actually
+ * being required (the docs call it optional; it isn't — see
+ * billingDataFor()). Everything else — the request/response shape, the
+ * `/unifiedcheckout` URL format, the HMAC field list — matched on the
+ * first try. The one thing still genuinely unconfirmed: the exact string
+ * form Paymob uses for a boolean in the HMAC concatenation (see
+ * verifySignature()) — that only surfaces once a real webhook fires.
  */
 class PaymobGateway implements PaymentGateway
 {
@@ -56,28 +56,82 @@ class PaymobGateway implements PaymentGateway
         return PlatformSetting::get('paymob_hmac_secret') ?: config('services.paymob.hmac_secret');
     }
 
+    /**
+     * Confirmed live (2026-08-28): `payment_methods: ['card']` (the string
+     * form the docs describe) is rejected with "Integration ID/Name does
+     * not exist in our system" — this account's actual numeric Integration
+     * ID (dashboard → Developers → Payment Integrations) is what's needed
+     * instead. That ID is account-specific, so it's admin-entered like the
+     * other three keys, not hardcoded.
+     */
+    public function integrationId(): ?string
+    {
+        return PlatformSetting::get('paymob_integration_id') ?: config('services.paymob.integration_id');
+    }
+
+    /**
+     * The Integration ID above (5885111 on the account this was built
+     * against) is fixed to EGP — confirmed live (2026-08-28), Paymob
+     * rejects any other `currency` value on the create-intention call. But
+     * the wallet itself is USD (see Wallet.currency / every UsageEvent /
+     * the whole billing engine) — converting the *wallet ledger* to EGP
+     * would mean touching BillingEngine and every usage calculation, a much
+     * bigger change than this gateway needs. So the conversion happens only
+     * here, at the charge boundary: the card gets charged in EGP at this
+     * rate, but the wallet is credited the exact USD amount the client
+     * actually asked for (stored in `extras`, not re-derived from the EGP
+     * figure that comes back — see handleWebhook()). Admin-set, not fetched
+     * live, so it never silently drifts without someone choosing a value —
+     * update it here whenever the real rate moves meaningfully.
+     */
+    public function usdToEgpRate(): ?float
+    {
+        $rate = PlatformSetting::get('paymob_usd_to_egp_rate') ?: config('services.paymob.usd_to_egp_rate');
+
+        return $rate ? (float) $rate : null;
+    }
+
     public function isConfigured(): bool
     {
-        return filled($this->secretKey()) && filled($this->publicKey()) && filled($this->hmacSecret());
+        return filled($this->secretKey()) && filled($this->publicKey())
+            && filled($this->hmacSecret()) && filled($this->integrationId())
+            && $this->usdToEgpRate() > 0;
     }
 
     public function createTopupSession(Company $company, float $amount, string $currency): string
     {
         if (! $this->isConfigured()) {
-            throw new RuntimeException('Paymob is not configured — add the API keys in the admin dashboard first.');
+            throw new RuntimeException('Paymob is not configured — add the API keys (and the USD→EGP rate) in the admin dashboard first.');
         }
 
+        if (strtoupper($currency) !== 'USD') {
+            // Nothing in this app creates a non-USD wallet today — this is a
+            // guard against silently mis-converting if that ever changes,
+            // not a real code path.
+            throw new RuntimeException("Paymob gateway only supports USD wallets today (got {$currency}).");
+        }
+
+        $egpAmount = round($amount * $this->usdToEgpRate(), 2);
         $base = rtrim(config('pingly.paymob.api_base'), '/');
 
         try {
             $response = Http::withToken($this->secretKey(), 'Token')
                 ->timeout(30)
                 ->post("{$base}/v1/intention/", [
-                    'amount' => (int) round($amount * 100), // Paymob wants the smallest currency unit
-                    'currency' => strtoupper($currency),
-                    'payment_methods' => ['card'],
+                    'amount' => (int) round($egpAmount * 100), // Paymob wants the smallest currency unit
+                    'currency' => 'EGP', // fixed by the Integration ID, not by the caller — see usdToEgpRate()
+                    'payment_methods' => [(int) $this->integrationId()],
+                    'billing_data' => $this->billingDataFor($company),
                     'special_reference' => (string) $company->id.'-'.now()->timestamp,
-                    'extras' => ['company_id' => $company->id], // echoed back in the webhook — see handleWebhook()
+                    'extras' => [
+                        'company_id' => $company->id,
+                        // The wallet gets credited this exact figure on success — never
+                        // re-derived from amount_cents/currency in the webhook, so a
+                        // stale rate or EGP rounding never changes what the client's
+                        // wallet actually receives versus what they were shown.
+                        'requested_amount' => $amount,
+                        'requested_currency' => 'USD',
+                    ],
                     'notification_url' => config('app.url').'/api/webhooks/paymob',
                     'redirection_url' => config('pingly.frontend_url').'/wallet?topup=success',
                 ]);
@@ -96,6 +150,38 @@ class PaymobGateway implements PaymentGateway
         }
 
         return "{$base}/unifiedcheckout/?publicKey={$this->publicKey()}&clientSecret={$clientSecret}";
+    }
+
+    /**
+     * Confirmed live (2026-08-28): despite the docs calling `billing_data`
+     * optional, Paymob rejects a create-intention request without it —
+     * `first_name`/`last_name`/`email`/`phone_number` specifically. Company
+     * doesn't collect a phone number or a real postal address today, so
+     * those go in as clearly-fake placeholders; Paymob doesn't validate
+     * their authenticity for a card payment, only that the fields exist.
+     * If that ever changes, this is the one place to add real fields to.
+     *
+     * @return array<string, string>
+     */
+    private function billingDataFor(Company $company): array
+    {
+        [$firstName, $lastName] = array_pad(explode(' ', $company->name, 2), 2, 'Account');
+
+        return [
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'email' => $company->contact_email,
+            'phone_number' => '+201000000000', // placeholder — not collected from the company today
+            'street' => 'NA',
+            'building' => 'NA',
+            'floor' => 'NA',
+            'apartment' => 'NA',
+            'city' => 'NA',
+            'state' => 'NA',
+            'country' => 'NA',
+            'postal_code' => 'NA',
+            'shipping_method' => 'NA',
+        ];
     }
 
     public function handleWebhook(Request $request): Response
@@ -117,14 +203,18 @@ class PaymobGateway implements PaymentGateway
         $pending = ($obj['pending'] ?? true) === true;
 
         if ($success && ! $pending) {
-            $companyId = $obj['extras']['company_id'] ?? null;
+            $extras = $obj['extras'] ?? [];
+            $companyId = $extras['company_id'] ?? null;
             $company = $companyId ? Company::find($companyId) : null;
 
             if ($company) {
+                // Credit the USD amount the client actually requested (see
+                // createTopupSession()'s docblock) — not amount_cents/currency,
+                // which is the EGP figure the card was actually charged.
                 $this->billing->creditTopup(
                     company: $company,
-                    amount: ((int) ($obj['amount_cents'] ?? 0)) / 100,
-                    currency: strtoupper($obj['currency'] ?? 'EGP'),
+                    amount: (float) ($extras['requested_amount'] ?? ((int) ($obj['amount_cents'] ?? 0)) / 100),
+                    currency: strtoupper($extras['requested_currency'] ?? $obj['currency'] ?? 'EGP'),
                     provider: 'paymob',
                     providerReference: (string) ($obj['id'] ?? $obj['order']['id'] ?? ''),
                 );

@@ -9,10 +9,12 @@ use App\Services\Payments\PaymobGateway;
 use Illuminate\Http\Request;
 
 /**
- * Paymob's three keys are entered here, not .env — admin-managed, encrypted
- * at rest (platform_settings.value), same pattern as every other connection
- * screen. Raw values are never sent back to the browser once saved, only a
- * masked preview.
+ * Paymob's keys are entered here, not .env — admin-managed, encrypted at
+ * rest (platform_settings.value), same pattern as every other connection
+ * screen. The three real secrets (public/secret/HMAC) never come back to
+ * the browser once saved, only a masked preview each; the Integration ID
+ * and the USD→EGP rate aren't secrets (an account identifier and a pricing
+ * choice, not credentials), so they're returned in full.
  */
 class PaymobConnectionController extends Controller
 {
@@ -24,6 +26,8 @@ class PaymobConnectionController extends Controller
             'public_key' => $this->preview($this->paymob->publicKey()),
             'secret_key' => $this->preview($this->paymob->secretKey()),
             'hmac_secret' => $this->preview($this->paymob->hmacSecret()),
+            'integration_id' => $this->paymob->integrationId(),
+            'usd_to_egp_rate' => $this->paymob->usdToEgpRate(),
             'configured' => $this->paymob->isConfigured(),
         ]);
     }
@@ -34,6 +38,8 @@ class PaymobConnectionController extends Controller
             'paymob_public_key' => ['sometimes', 'string', 'min:6'],
             'paymob_secret_key' => ['sometimes', 'string', 'min:6'],
             'paymob_hmac_secret' => ['sometimes', 'string', 'min:6'],
+            'paymob_integration_id' => ['sometimes', 'string', 'min:1'],
+            'paymob_usd_to_egp_rate' => ['sometimes', 'numeric', 'min:0.01'],
         ]);
 
         if ($data === []) {
@@ -41,7 +47,7 @@ class PaymobConnectionController extends Controller
         }
 
         foreach ($data as $key => $value) {
-            PlatformSetting::set($key, $value);
+            PlatformSetting::set($key, (string) $value);
         }
 
         AuditLog::record($request->user(), 'paymob_connection.update', 'Updated Paymob key(s): '.implode(', ', array_keys($data)));
@@ -51,7 +57,7 @@ class PaymobConnectionController extends Controller
 
     public function destroy(Request $request)
     {
-        foreach (['paymob_public_key', 'paymob_secret_key', 'paymob_hmac_secret'] as $key) {
+        foreach (['paymob_public_key', 'paymob_secret_key', 'paymob_hmac_secret', 'paymob_integration_id', 'paymob_usd_to_egp_rate'] as $key) {
             PlatformSetting::set($key, null);
         }
 
