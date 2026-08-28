@@ -35,11 +35,20 @@ return [
         ],
     ],
 
-    // Wallet top-ups (docs §4.7 — decided: international cards via Stripe Checkout).
+    // Wallet top-ups — kept working in case a Stripe-eligible entity ever
+    // exists, but Stripe doesn't support Egypt-based payout accounts, so
+    // Tap (below) is the one that's actually reachable for this business.
     'stripe' => [
         'key' => env('STRIPE_KEY'),
         'secret' => env('STRIPE_SECRET'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
+    // Wallet top-ups (docs §4.7 — decided: Gulf-focused, most revenue from
+    // Saudi/UAE) — Tap covers cards + Mada across the GCC in one integration.
+    'tap' => [
+        'secret_key' => env('TAP_SECRET_KEY'),
+        'publishable_key' => env('TAP_PUBLISHABLE_KEY'),
     ],
 
 ];

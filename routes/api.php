@@ -20,6 +20,7 @@ use App\Http\Controllers\Gateway\AiController as GatewayAiController;
 use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
 use App\Http\Controllers\Gateway\WhatsAppController as GatewayWhatsAppController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Http\Controllers\Webhooks\TapWebhookController;
 use App\Http\Controllers\Webhooks\WhatsappWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -40,11 +41,15 @@ Route::prefix('v1')->middleware(['api-key', 'throttle:60,1'])->group(function ()
 
 /*
 |--------------------------------------------------------------------------
-| Webhooks — public, no JWT. Each verifies its own caller (Stripe via
-| signature header, Meta via the verify-token handshake).
+| Webhooks — public, no JWT. Each verifies its own caller (Stripe/Tap via
+| a signature header, Meta via the verify-token handshake). Both payment
+| webhooks stay registered regardless of which one is the *active* gateway
+| — see the controllers' docblocks for why they bind concretely, not via
+| the PaymentGateway interface.
 |--------------------------------------------------------------------------
 */
 Route::post('/webhooks/stripe', [StripeWebhookController::class, 'handle']);
+Route::post('/webhooks/tap', [TapWebhookController::class, 'handle']);
 Route::get('/webhooks/whatsapp', [WhatsappWebhookController::class, 'verify']);
 Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive']);
 

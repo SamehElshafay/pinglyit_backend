@@ -34,14 +34,15 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Wallet top-up payment gateway (docs §4.7 — decided: international cards)
+    | Wallet top-up payment gateway (docs §4.7 — decided: Gulf-focused, so
+    | 'tap' — Stripe doesn't support an Egypt-based payout account, and most
+    | revenue here is Saudi/UAE anyway; see AppServiceProvider for the bind)
     |--------------------------------------------------------------------------
-    | 'stripe' by default now that cards-only/international is the decision.
-    | Set to 'none' to disable top-ups (WalletController falls back to a 501).
+    | 'none' disables top-ups entirely (WalletController falls back to a 501).
     */
-    'payment_gateway' => env('PAYMENT_GATEWAY', 'stripe'),
+    'payment_gateway' => env('PAYMENT_GATEWAY', 'tap'),
 
-    // Where to send the client back after a Stripe Checkout session (the
+    // Where to send the client back after a hosted checkout session (the
     // user_website dashboard, not the API's own URL).
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5184'),
 
