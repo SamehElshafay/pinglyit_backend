@@ -4,17 +4,22 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
+use App\Models\BillingReconciliation;
 use App\Models\UsageEvent;
 use Illuminate\Support\Carbon;
 
 class ReconciliationController extends Controller
 {
     /**
-     * "matched" vs. Pingly's actual OpenRouter invoice is a scheduled job
-     * this doesn't run yet (docs §4.5) — every period reports as 'pending'
-     * until that reconciliation job exists and writes a real invoice total.
-     * The real_cost / margin numbers themselves are already accurate, since
-     * they come straight from UsageEvent.
+     * "matched" vs. Pingly's actual OpenRouter spend comes from the daily
+     * ReconcileAiBilling job (routes/console.php), which writes one row per
+     * month to billing_reconciliations. OpenRouter's own API only reports a
+     * lifetime running total (no historical per-month breakdown), so in
+     * practice only the *current* period ever carries a real matched/drifted
+     * status — closed months stay 'pending', honestly, since there's nothing
+     * to check them against after the fact. The real_cost / margin numbers
+     * themselves are always accurate regardless, since they come straight
+     * from UsageEvent.
      */
     public function index()
     {
@@ -27,18 +32,33 @@ class ReconciliationController extends Controller
                 ->where('created_at', '>=', $periodStart)->sum('billed_amount_to_client'),
         ];
 
-        $periods = UsageEvent::where('service_type', ServiceType::Ai)
-            ->selectRaw("strftime('%Y-%m', created_at) as period, sum(raw_cost_to_pingly) as real_cost")
-            ->groupBy('period')
-            ->orderByDesc('period')
-            ->limit(12)
-            ->get()
-            ->map(fn ($row) => [
-                'period' => $row->period,
-                'realCost' => (float) $row->real_cost,
-                'invoiced' => null,
-                'status' => 'pending',
-            ]);
+        // Grouped here in PHP rather than with a driver-specific SQL date
+        // function (e.g. MySQL's DATE_FORMAT vs. SQLite's strftime) — this
+        // stays correct on both the MySQL used in production and the SQLite
+        // in-memory DB the test suite runs against. Bounded to ~13 months so
+        // this doesn't scan the whole table forever as usage grows.
+        $monthlyRealCost = UsageEvent::where('service_type', ServiceType::Ai)
+            ->where('created_at', '>=', Carbon::now()->subMonths(13)->startOfMonth())
+            ->get(['created_at', 'raw_cost_to_pingly'])
+            ->groupBy(fn (UsageEvent $event) => $event->created_at->format('Y-m'))
+            ->map(fn ($group) => (float) $group->sum('raw_cost_to_pingly'));
+
+        $reconciliations = BillingReconciliation::query()->get()->keyBy('period');
+
+        $periods = $monthlyRealCost->sortKeysDesc()->take(12)
+            ->map(function (float $realCost, string $period) use ($reconciliations) {
+                $run = $reconciliations->get($period);
+
+                return [
+                    'period' => $period,
+                    'realCost' => $realCost,
+                    'invoiced' => $run?->openrouter_reported_usage !== null ? (float) $run->openrouter_reported_usage : null,
+                    'status' => $run->status ?? 'pending',
+                    'note' => $run?->note,
+                    'checkedAt' => $run?->checked_at,
+                ];
+            })
+            ->values();
 
         return response()->json([
             'real_openrouter_cost' => $totals['real_cost'],

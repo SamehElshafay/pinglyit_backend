@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\PlatformSetting;
 use App\Services\Ai\AiGatewayService;
 use Illuminate\Http\Request;
@@ -31,13 +32,15 @@ class AiConnectionController extends Controller
         $data = $request->validate(['openrouter_api_key' => ['required', 'string', 'min:10']]);
 
         PlatformSetting::set('openrouter_api_key', $data['openrouter_api_key']);
+        AuditLog::record($request->user(), 'ai_connection.update', 'Updated the OpenRouter API key');
 
         return $this->show();
     }
 
-    public function destroy()
+    public function destroy(Request $request)
     {
         PlatformSetting::set('openrouter_api_key', null);
+        AuditLog::record($request->user(), 'ai_connection.destroy', 'Removed the OpenRouter API key');
 
         return $this->show();
     }

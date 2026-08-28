@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\PlatformSetting;
 use App\Services\Payments\TapGateway;
 use Illuminate\Http\Request;
@@ -31,13 +32,15 @@ class PaymentConnectionController extends Controller
         $data = $request->validate(['tap_secret_key' => ['required', 'string', 'min:10']]);
 
         PlatformSetting::set('tap_secret_key', $data['tap_secret_key']);
+        AuditLog::record($request->user(), 'payment_connection.update', 'Updated the Tap Payments API key');
 
         return $this->show();
     }
 
-    public function destroy()
+    public function destroy(Request $request)
     {
         PlatformSetting::set('tap_secret_key', null);
+        AuditLog::record($request->user(), 'payment_connection.destroy', 'Removed the Tap Payments API key');
 
         return $this->show();
     }

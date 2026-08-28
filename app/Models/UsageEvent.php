@@ -3,11 +3,14 @@
 namespace App\Models;
 
 use App\Enums\ServiceType;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class UsageEvent extends Model
 {
+    use HasFactory;
+
     protected $fillable = [
         'company_id', 'service_type', 'raw_cost_to_pingly',
         'billed_amount_to_client', 'multiplier_or_margin_applied', 'metadata',

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Services\Billing\ServiceConfigRepository;
 use Illuminate\Http\Request;
 
@@ -29,6 +30,13 @@ class WhatsappPricingController extends Controller
 
         $existing = $this->configs->platformDefault(ServiceType::WhatsApp);
         $config = $this->configs->setPlatformDefault(ServiceType::WhatsApp, array_merge($existing, $data));
+
+        AuditLog::record(
+            $request->user(),
+            'whatsapp_pricing.update',
+            "Set WhatsApp Gateway margin to {$data['margin_percent']}% and monthly fee to \${$data['monthly_fee']}",
+            meta: $data,
+        );
 
         return response()->json($config->pricing_config);
     }

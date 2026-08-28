@@ -6,6 +6,7 @@ use App\Contracts\PaymentGateway;
 use App\Models\Company;
 use App\Models\PlatformSetting;
 use App\Services\Billing\BillingEngine;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Http;
@@ -72,7 +73,7 @@ class TapGateway implements PaymentGateway
                     'metadata' => ['company_id' => $company->id],
                     'description' => 'Pingly wallet top-up',
                 ]);
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+        } catch (ConnectionException $e) {
             throw new RuntimeException("Couldn't reach Tap: {$e->getMessage()}");
         }
 

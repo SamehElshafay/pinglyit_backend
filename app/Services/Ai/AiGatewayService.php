@@ -236,6 +236,39 @@ class AiGatewayService
         );
     }
 
+    /**
+     * OpenRouter's own record of lifetime spend on this key (GET /credits) —
+     * used only by the reconciliation job (ReconcileAiBilling) to sanity-check
+     * our own recorded totals against OpenRouter's; never shown to a client.
+     * Returns null if not configured or the request fails — the caller
+     * (a scheduled command, not a request the client is waiting on) decides
+     * what that means, so this never throws.
+     */
+    public function accountUsage(): ?float
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+
+        try {
+            $response = Http::withToken($this->apiKey())
+                ->timeout(30)
+                ->get(config('pingly.ai.openrouter_api_base').'/credits');
+        } catch (ConnectionException $e) {
+            Log::warning('OpenRouter /credits lookup failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        if ($response->failed()) {
+            Log::warning('OpenRouter /credits returned an error', ['status' => $response->status()]);
+
+            return null;
+        }
+
+        return (float) $response->json('data.total_usage', 0);
+    }
+
     public function recordCompletion(Company $company, string $model, int $realTokens, float $realCostUsd): void
     {
         $multiplier = $this->multiplierFor($company, $model);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Company;
 use App\Services\Ai\AiGatewayService;
 use App\Services\Billing\ServiceConfigRepository;
@@ -79,6 +80,16 @@ class ClientController extends Controller
             $this->configs->setClientOverride($company, ServiceType::WhatsApp, $override);
         }
 
+        if ($data !== []) {
+            AuditLog::record(
+                $request->user(),
+                'client.whatsapp_config.update',
+                $this->describeClientConfigChange('WhatsApp Gateway', $data),
+                $company,
+                $data,
+            );
+        }
+
         return response()->json(['whatsapp' => [
             'enabled' => $this->whatsapp->isEnabledFor($company),
             'pricing' => $this->whatsapp->pricingFor($company),
@@ -101,10 +112,37 @@ class ClientController extends Controller
             $this->configs->setClientOverride($company, ServiceType::Ai, $override);
         }
 
+        if ($data !== []) {
+            AuditLog::record(
+                $request->user(),
+                'client.ai_config.update',
+                $this->describeClientConfigChange('AI Gateway', $data),
+                $company,
+                $data,
+            );
+        }
+
         return response()->json(['ai' => [
             'enabled' => $this->ai->isEnabledFor($company),
             'pricing' => $this->ai->pricingFor($company),
         ]]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  validated request data (only the keys actually sent)
+     */
+    private function describeClientConfigChange(string $service, array $data): string
+    {
+        $parts = [];
+
+        if (array_key_exists('enabled', $data)) {
+            $parts[] = $data['enabled'] ? 'enabled' : 'disabled';
+        }
+        foreach (array_diff_key($data, ['enabled' => null]) as $key => $value) {
+            $parts[] = "{$key} → {$value}";
+        }
+
+        return "{$service}: ".implode(', ', $parts);
     }
 
     /**

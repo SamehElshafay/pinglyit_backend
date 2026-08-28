@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AiConnectionController;
 use App\Http\Controllers\Admin\AiLogController;
 use App\Http\Controllers\Admin\AiPricingController;
+use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\OverviewController as AdminOverviewController;
 use App\Http\Controllers\Admin\PaymentConnectionController;
@@ -12,6 +13,7 @@ use App\Http\Controllers\Admin\WhatsappLogController;
 use App\Http\Controllers\Admin\WhatsappPricingController;
 use App\Http\Controllers\Auth\AdminAuthController;
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
@@ -62,6 +64,8 @@ Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive'])
 Route::middleware('throttle:10,1')->group(function () {
     Route::post('/register', [RegisterController::class, 'store']);
     Route::post('/login', [LoginController::class, 'store']);
+    Route::post('/forgot-password', [PasswordResetController::class, 'forgot']);
+    Route::post('/reset-password', [PasswordResetController::class, 'reset']);
 });
 
 Route::middleware(['jwt', 'client'])->group(function () {
@@ -126,5 +130,7 @@ Route::prefix('admin')->group(function () {
         Route::get('/payment/connection', [PaymentConnectionController::class, 'show']);
         Route::put('/payment/connection', [PaymentConnectionController::class, 'update']);
         Route::delete('/payment/connection', [PaymentConnectionController::class, 'destroy']);
+
+        Route::get('/audit-log', [AuditLogController::class, 'index']);
     });
 });

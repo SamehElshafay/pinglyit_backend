@@ -5,6 +5,7 @@ namespace App\Services\Auth;
 use App\Models\AdminUser;
 use App\Models\RevokedToken;
 use App\Models\User;
+use Firebase\JWT\ExpiredException;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -45,7 +46,7 @@ class JwtService
     }
 
     /**
-     * @throws \Firebase\JWT\ExpiredException|\UnexpectedValueException on an invalid/expired token
+     * @throws ExpiredException|\UnexpectedValueException on an invalid/expired token
      */
     public function decode(string $token): stdClass
     {
