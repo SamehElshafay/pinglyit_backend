@@ -9,6 +9,7 @@ use App\Models\UsageEvent;
 use App\Models\WalletAdjustment;
 use App\Models\WalletTopup;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The one place every service's usage turns into a wallet debit. A new
@@ -36,6 +37,14 @@ class BillingEngine
      * the balance negative; the pre-flight check above is what prevents
      * that in the common case.
      *
+     * Hard ceiling per single event (config('pingly.max_billed_per_event'),
+     * default $5): whatever a service computes, this is the one place that
+     * amount actually reaches the wallet, so it's the one place a mistake
+     * anywhere upstream — this service's math, a bad price lookup, a future
+     * service that gets it wrong — can be stopped before a client actually
+     * loses real money to it. Tripping it never blocks the request; it caps
+     * the charge and logs loudly so it gets caught, not silently eaten.
+     *
      * @param  array<string, mixed>  $metadata  service-specific detail (category/country, model/tokens, etc.)
      */
     public function recordUsage(
@@ -46,6 +55,22 @@ class BillingEngine
         ?float $multiplierOrMargin = null,
         array $metadata = [],
     ): UsageEvent {
+        $cap = (float) config('pingly.max_billed_per_event');
+
+        if ($cap > 0 && $billedAmountToClient > $cap) {
+            Log::critical('Billing safety cap triggered — charge capped, does not reflect the raw calculation', [
+                'company_id' => $company->id,
+                'service_type' => $service->value,
+                'calculated_amount' => $billedAmountToClient,
+                'capped_at' => $cap,
+                'metadata' => $metadata,
+            ]);
+
+            $metadata['billing_cap_triggered'] = true;
+            $metadata['uncapped_amount'] = $billedAmountToClient;
+            $billedAmountToClient = $cap;
+        }
+
         return DB::transaction(function () use ($company, $service, $rawCostToPingly, $billedAmountToClient, $multiplierOrMargin, $metadata) {
             $wallet = $company->wallet()->lockForUpdate()->firstOrFail();
             $wallet->decrement('balance', $billedAmountToClient);

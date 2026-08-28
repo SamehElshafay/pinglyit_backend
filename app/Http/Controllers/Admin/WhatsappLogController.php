@@ -25,6 +25,7 @@ class WhatsappLogController extends Controller
             'country' => $e->metadata['country'] ?? null,
             'cost' => (float) $e->raw_cost_to_pingly,
             'price' => (float) $e->billed_amount_to_client,
+            'capped' => (bool) ($e->metadata['billing_cap_triggered'] ?? false),
         ]));
     }
 }

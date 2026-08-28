@@ -44,6 +44,8 @@ class DatabaseSeeder extends Seeder
                 'openai/gpt-4o-mini' => 8,
                 'mistralai/mistral-nemo' => 10, // cheapest on OpenRouter — high multiplier still nets pennies for the client
                 'meta-llama/llama-3.1-8b-instruct' => 10,
+                'google/gemini-2.5-flash-lite' => 10,
+                'google/gemini-2.5-flash' => 6,
             ],
         ]);
 

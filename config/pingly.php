@@ -45,4 +45,16 @@ return [
     // user_website dashboard, not the API's own URL).
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5184'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Billing safety cap
+    |--------------------------------------------------------------------------
+    | A hard ceiling, in dollars, on what a *single* usage event can debit
+    | from a wallet — see BillingEngine::recordUsage(). Exists so a pricing
+    | mistake (wrong multiplier, bad price lookup, a future service that gets
+    | its math wrong) caps out instead of silently draining real money from a
+    | client. Set to 0 to disable (not recommended).
+    */
+    'max_billed_per_event' => (float) env('MAX_BILLED_PER_EVENT', 5.00),
+
 ];

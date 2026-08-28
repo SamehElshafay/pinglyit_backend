@@ -25,6 +25,9 @@ class AiLogController extends Controller
             'realCost' => (float) $e->raw_cost_to_pingly,
             'multiplier' => (float) $e->multiplier_or_margin_applied,
             'billedTokens' => $e->metadata['billed_tokens'] ?? null,
+            'billed' => (float) $e->billed_amount_to_client,
+            'capped' => (bool) ($e->metadata['billing_cap_triggered'] ?? false),
+            'uncappedAmount' => $e->metadata['uncapped_amount'] ?? null,
         ]));
     }
 }
