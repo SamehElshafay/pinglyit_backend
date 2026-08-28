@@ -38,6 +38,11 @@ class Company extends Model
         return $this->hasMany(WalletAdjustment::class);
     }
 
+    public function walletTopups(): HasMany
+    {
+        return $this->hasMany(WalletTopup::class);
+    }
+
     public function whatsappAccounts(): HasMany
     {
         return $this->hasMany(WhatsappAccount::class);

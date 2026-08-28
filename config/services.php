@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    // Wallet top-ups (docs §4.7 — decided: international cards via Stripe Checkout).
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
 ];

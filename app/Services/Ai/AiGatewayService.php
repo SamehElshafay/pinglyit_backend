@@ -6,6 +6,8 @@ use App\Enums\ServiceType;
 use App\Models\Company;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 /**
@@ -77,10 +79,11 @@ class AiGatewayService
     }
 
     /**
-     * Forward a request to OpenRouter. Balance is checked with a rough
-     * estimate up front; the real bill is only known once OpenRouter
-     * responds with actual usage, which is why recordCompletion() below is
-     * the step that actually touches the wallet.
+     * Forward a request to OpenRouter, bill it, return the completion.
+     * Real cost can only be known after OpenRouter responds with actual
+     * token usage — so the only pre-flight check possible is "is the
+     * wallet not already empty", not an exact estimate (docs §4.4's flow:
+     * send → real usage/cost comes back → then bill).
      *
      * @param  array<int, array<string, string>>  $messages
      */
@@ -90,12 +93,54 @@ class AiGatewayService
             throw new RuntimeException('AI Gateway is not configured — set OPENROUTER_API_KEY in .env.');
         }
 
-        // TODO: call OpenRouter's chat completions endpoint via
-        // Http::withToken(config('pingly.ai.openrouter_api_key'))
-        //   ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', [...]);
-        // The response carries real token usage + real cost, which
-        // recordCompletion() below turns into a UsageEvent + wallet debit.
-        throw new RuntimeException('OpenRouter integration not implemented yet — see TODO in '.self::class);
+        if (! $this->billing->hasSufficientBalance($company, 0.000001)) {
+            throw new RuntimeException('Wallet balance is empty — top up before making AI requests.');
+        }
+
+        $response = Http::withToken(config('pingly.ai.openrouter_api_key'))
+            ->timeout(60)
+            ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', [
+                'model' => $model,
+                'messages' => $messages,
+            ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('OpenRouter request failed: '.$response->body());
+        }
+
+        $data = $response->json();
+        $usage = $data['usage'] ?? ['prompt_tokens' => 0, 'completion_tokens' => 0, 'total_tokens' => 0];
+        $realTokens = (int) ($usage['total_tokens'] ?? 0);
+        $realCost = $this->estimateRealCost($model, $usage);
+
+        $this->recordCompletion($company, $model, $realTokens, $realCost);
+
+        return $data;
+    }
+
+    /**
+     * OpenRouter doesn't return cost inline with the completion — its
+     * per-token prompt/completion pricing comes from GET /models, cached
+     * for an hour so a chat request doesn't cost two HTTP round trips.
+     *
+     * @param  array{prompt_tokens?: int, completion_tokens?: int}  $usage
+     */
+    private function estimateRealCost(string $model, array $usage): float
+    {
+        $pricing = Cache::remember("openrouter_pricing:{$model}", 3600, function () use ($model) {
+            $response = Http::withToken(config('pingly.ai.openrouter_api_key'))
+                ->get(config('pingly.ai.openrouter_api_base').'/models');
+
+            $found = collect($response->json('data', []))->firstWhere('id', $model);
+
+            return $found['pricing'] ?? ['prompt' => 0, 'completion' => 0];
+        });
+
+        return round(
+            (int) ($usage['prompt_tokens'] ?? 0) * (float) ($pricing['prompt'] ?? 0)
+            + (int) ($usage['completion_tokens'] ?? 0) * (float) ($pricing['completion'] ?? 0),
+            8,
+        );
     }
 
     public function recordCompletion(Company $company, string $model, int $realTokens, float $realCostUsd): void

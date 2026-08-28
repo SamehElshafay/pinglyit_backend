@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\Company;
 use App\Models\UsageEvent;
 use App\Models\WalletAdjustment;
+use App\Models\WalletTopup;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -76,6 +77,30 @@ class BillingEngine
                 'amount' => $amount,
                 'reason' => $reason,
             ]);
+        });
+    }
+
+    /**
+     * Credit a real-money top-up (Stripe or whatever gateway is active).
+     * Idempotent on `providerReference` — a webhook retry for the same
+     * Stripe session/charge id will not double-credit the wallet.
+     */
+    public function creditTopup(Company $company, float $amount, string $currency, string $provider, string $providerReference): WalletTopup
+    {
+        return DB::transaction(function () use ($company, $amount, $currency, $provider, $providerReference) {
+            $topup = WalletTopup::query()->lockForUpdate()->firstOrCreate(
+                ['provider' => $provider, 'provider_reference' => $providerReference],
+                ['company_id' => $company->id, 'amount' => $amount, 'currency' => $currency, 'status' => 'pending'],
+            );
+
+            if ($topup->status === 'completed') {
+                return $topup; // already credited — webhook fired more than once
+            }
+
+            $company->wallet()->lockForUpdate()->increment('balance', $amount);
+            $topup->update(['status' => 'completed']);
+
+            return $topup;
         });
     }
 }

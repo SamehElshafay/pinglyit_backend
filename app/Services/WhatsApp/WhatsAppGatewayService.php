@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Models\Company;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
+use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 /**
@@ -56,10 +57,10 @@ class WhatsAppGatewayService
     }
 
     /**
-     * cost-to-Pingly + margin, for one message category/country — the same
-     * math the admin's WhatsApp pricing screen and this service both use.
+     * The raw cost-to-Pingly for one category/country, straight from the
+     * base cost table — no margin applied yet.
      */
-    public function estimateCost(Company $company, string $category, string $country): float
+    private function baseCostFor(Company $company, string $category, string $country): float
     {
         $pricing = $this->pricingFor($company);
         $base = collect($pricing['base_costs'] ?? [])
@@ -69,22 +70,36 @@ class WhatsAppGatewayService
             throw new RuntimeException("No base cost configured for {$category}/{$country} — add it to the WhatsApp pricing config first.");
         }
 
-        $margin = (float) ($pricing['margin_percent'] ?? 0);
-
-        return round((float) $base['cost'] * (1 + $margin / 100), 6);
+        return (float) $base['cost'];
     }
 
     /**
-     * Send one message. Pre-flight balance check, then the real Meta call,
-     * then records the real cost against the wallet.
+     * cost-to-Pingly + margin, for one message category/country — what the
+     * client is actually billed. Same math the admin's pricing screen uses.
+     */
+    public function estimateCost(Company $company, string $category, string $country): float
+    {
+        $pricing = $this->pricingFor($company);
+        $margin = (float) ($pricing['margin_percent'] ?? 0);
+
+        return round($this->baseCostFor($company, $category, $country) * (1 + $margin / 100), 6);
+    }
+
+    /**
+     * Send one message via Meta's Cloud API. Pre-flight balance check
+     * against the estimated bill, then the real call, then records the
+     * billable event using our own known base cost (Meta doesn't return
+     * per-message cost synchronously — that only shows up in Meta's own
+     * billing reports, so our admin-configured base cost table is the
+     * source of truth here, same as the pricing screen already assumes).
      *
-     * @param  array<string, mixed>  $payload  the WhatsApp message payload (template, text, etc.)
+     * @param  array<string, mixed>  $payload  the message body — merged into the Cloud API request as-is (e.g. `['type' => 'text', 'text' => ['body' => '...']]`)
      */
     public function send(Company $company, string $to, string $category, string $country, array $payload): array
     {
-        $estimatedCost = $this->estimateCost($company, $category, $country);
+        $estimatedBilled = $this->estimateCost($company, $category, $country);
 
-        if (! $this->billing->hasSufficientBalance($company, $estimatedCost)) {
+        if (! $this->billing->hasSufficientBalance($company, $estimatedBilled)) {
             throw new RuntimeException('Wallet balance is too low to send this message.');
         }
 
@@ -92,16 +107,32 @@ class WhatsAppGatewayService
             throw new RuntimeException('WhatsApp Gateway is not configured — set META_WHATSAPP_* in .env.');
         }
 
-        // TODO: call Meta's WhatsApp Cloud API (POST /{phone-number-id}/messages)
-        // via Http::withToken(config('pingly.whatsapp.access_token')), using
-        // $company->whatsappAccounts for the sending number. Real per-message
-        // cost/status comes back from Meta's response + webhook delivery receipts.
-        throw new RuntimeException('Meta Cloud API integration not implemented yet — see TODO in '.self::class);
+        $account = $company->whatsappAccounts()->where('status', 'connected')->whereNotNull('phone_number_id')->first();
+        if (! $account) {
+            throw new RuntimeException('This company has no connected WhatsApp number.');
+        }
+
+        $apiVersion = config('pingly.whatsapp.api_version');
+        $response = Http::withToken(config('pingly.whatsapp.access_token'))
+            ->timeout(30)
+            ->post("https://graph.facebook.com/{$apiVersion}/{$account->phone_number_id}/messages", array_merge([
+                'messaging_product' => 'whatsapp',
+                'to' => $to,
+            ], $payload));
+
+        if ($response->failed()) {
+            throw new RuntimeException('Meta Cloud API error: '.$response->body());
+        }
+
+        $this->recordDeliveredMessage($company, $category, $country, $this->baseCostFor($company, $category, $country));
+
+        return $response->json();
     }
 
     /**
-     * Called once the real cost is known (from Meta's response or webhook) —
-     * this is the actual billing step; send() above is the request path.
+     * The actual billing step — raw cost in, margin applied here, wallet
+     * debited. Called from send() above at request time, or again from
+     * the webhook if a delivery receipt ever needs to correct the figure.
      */
     public function recordDeliveredMessage(Company $company, string $category, string $country, float $realCost): void
     {

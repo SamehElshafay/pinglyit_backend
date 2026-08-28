@@ -5,15 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class WhatsappAccount extends Model
+class WalletTopup extends Model
 {
-    protected $fillable = ['company_id', 'waba_id', 'phone_number_id', 'phone_number', 'status', 'connected_at'];
+    protected $fillable = ['company_id', 'provider', 'provider_reference', 'amount', 'currency', 'status'];
 
     protected function casts(): array
     {
-        return [
-            'connected_at' => 'datetime',
-        ];
+        return ['amount' => 'decimal:4'];
     }
 
     public function company(): BelongsTo

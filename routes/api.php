@@ -15,7 +15,19 @@ use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ServiceController;
 use App\Http\Controllers\Client\WalletController;
+use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Http\Controllers\Webhooks\WhatsappWebhookController;
 use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| Webhooks — public, no JWT. Each verifies its own caller (Stripe via
+| signature header, Meta via the verify-token handshake).
+|--------------------------------------------------------------------------
+*/
+Route::post('/webhooks/stripe', [StripeWebhookController::class, 'handle']);
+Route::get('/webhooks/whatsapp', [WhatsappWebhookController::class, 'verify']);
+Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive']);
 
 /*
 |--------------------------------------------------------------------------
@@ -39,7 +51,9 @@ Route::middleware(['jwt', 'client'])->group(function () {
 
     Route::get('/services', [ServiceController::class, 'index']);
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
+    Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);
     Route::get('/services/ai', [ServiceController::class, 'ai']);
+    Route::post('/services/ai/chat', [ServiceController::class, 'chatAi']);
 
     Route::get('/api-keys', [ApiKeyController::class, 'index']);
     Route::post('/api-keys', [ApiKeyController::class, 'store']);

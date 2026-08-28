@@ -56,4 +56,66 @@ class ServiceController extends Controller
                 ]),
         ]);
     }
+
+    /**
+     * Send one WhatsApp message through the gateway — this is the actual
+     * "use the service" endpoint, as opposed to whatsapp() above which
+     * just reports on past usage.
+     */
+    public function sendWhatsapp(Request $request)
+    {
+        $data = $request->validate([
+            'to' => ['required', 'string'],
+            'category' => ['required', 'string', 'in:utility,authentication,marketing,service'],
+            'country' => ['required', 'string', 'size:2'],
+            'text' => ['required', 'string', 'max:4096'],
+        ]);
+
+        $company = $request->user()->company;
+
+        if (! $this->whatsapp->isEnabledFor($company)) {
+            return response()->json(['message' => 'WhatsApp Gateway is not enabled for this account.'], 403);
+        }
+
+        try {
+            $result = $this->whatsapp->send(
+                $company,
+                $data['to'],
+                $data['category'],
+                strtoupper($data['country']),
+                ['type' => 'text', 'text' => ['body' => $data['text']]],
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * Send one AI Gateway request — same relationship to ai() above.
+     */
+    public function chatAi(Request $request)
+    {
+        $data = $request->validate([
+            'model' => ['required', 'string'],
+            'messages' => ['required', 'array', 'min:1'],
+            'messages.*.role' => ['required', 'string', 'in:system,user,assistant'],
+            'messages.*.content' => ['required', 'string'],
+        ]);
+
+        $company = $request->user()->company;
+
+        if (! $this->ai->isEnabledFor($company)) {
+            return response()->json(['message' => 'AI Gateway is not enabled for this account.'], 403);
+        }
+
+        try {
+            $result = $this->ai->forward($company, $data['model'], $data['messages']);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json($result);
+    }
 }

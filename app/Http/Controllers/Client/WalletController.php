@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Client;
 
+use App\Contracts\PaymentGateway;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 
 class WalletController extends Controller
 {
+    public function __construct(private readonly PaymentGateway $gateway) {}
+
     public function show(Request $request)
     {
         $company = $request->user()->company;
@@ -18,7 +20,10 @@ class WalletController extends Controller
         $credits = $company->walletAdjustments()->latest()->limit(25)->get()
             ->map(fn ($a) => ['time' => $a->created_at, 'type' => 'Adjustment', 'amount' => (float) $a->amount]);
 
-        $transactions = $debits->concat($credits)
+        $topups = $company->walletTopups()->where('status', 'completed')->latest()->limit(25)->get()
+            ->map(fn ($t) => ['time' => $t->created_at, 'type' => 'Top-up (card)', 'amount' => (float) $t->amount]);
+
+        $transactions = $debits->concat($credits)->concat($topups)
             ->sortByDesc('time')
             ->values()
             ->take(25);
@@ -31,23 +36,22 @@ class WalletController extends Controller
     }
 
     /**
-     * Wallet top-up — no payment gateway is chosen yet (docs §4.7, open
-     * decision), so this stays a 501 until PAYMENT_GATEWAY is set to
-     * something real and a matching gateway client is wired in here.
+     * Card top-up, international — Stripe Checkout (docs §4.7, decided).
+     * Returns a URL; the frontend redirects the browser there. The wallet
+     * is only ever credited from the webhook once Stripe confirms payment
+     * (see StripeWebhookController), never from this response.
      */
     public function topup(Request $request)
     {
-        $request->validate(['amount' => ['required', 'numeric', 'min:1'], 'payment_method' => ['required', 'string']]);
+        $data = $request->validate(['amount' => ['required', 'numeric', 'min:1']]);
+        $company = $request->user()->company;
 
-        if (config('pingly.payment_gateway') === 'none') {
-            return response()->json([
-                'message' => 'No payment gateway is configured yet — set PAYMENT_GATEWAY in .env once one is chosen.',
-            ], 501);
+        try {
+            $url = $this->gateway->createTopupSession($company, $data['amount'], $company->wallet->currency ?? 'USD');
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 501);
         }
 
-        // TODO: create a charge/checkout session with the configured gateway
-        // (Paymob/Fawry/Stripe/...), then credit the wallet via BillingEngine
-        // once the gateway confirms payment (webhook, not this response).
-        abort(501, 'Payment gateway integration not implemented yet.');
+        return response()->json(['checkout_url' => $url]);
     }
 }
