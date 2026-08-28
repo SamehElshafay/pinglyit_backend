@@ -34,17 +34,39 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Wallet top-up payment gateway (docs §4.7 — decided: Gulf-focused, so
-    | 'tap' — Stripe doesn't support an Egypt-based payout account, and most
-    | revenue here is Saudi/UAE anyway; see AppServiceProvider for the bind)
+    | Wallet top-up payment gateway
     |--------------------------------------------------------------------------
-    | 'none' disables top-ups entirely (WalletController falls back to a 501).
+    | 'stripe' | 'tap' | 'paymob' | 'none' (disables top-ups — WalletController
+    | falls back to a 501). Originally Tap (Gulf-focused revenue), but Tap's
+    | own onboarding needs a bank account that doesn't exist yet; Paymob
+    | (Egyptian, accepted an individual account today) is what's actually
+    | reachable right now — see AppServiceProvider for the bind. This is a
+    | one-time deployment choice, not a secret, so it stays here rather than
+    | in the admin-managed PlatformSetting store (each gateway's own API keys
+    | still live there, encrypted — see AiConnectionController's docblock).
     */
-    'payment_gateway' => env('PAYMENT_GATEWAY', 'tap'),
+    'payment_gateway' => env('PAYMENT_GATEWAY', 'paymob'),
 
     // Where to send the client back after a hosted checkout session (the
     // user_website dashboard, not the API's own URL).
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5184'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Paymob (docs: see PaymobGateway's own docblock)
+    |--------------------------------------------------------------------------
+    | Regional API base — the merchant account this was built against is
+    | Egypt-registered. Paymob also runs ksa.paymob.com / uae.paymob.com /
+    | oman.paymob.com for merchant accounts opened in those countries; change
+    | this if the account ever moves.
+    */
+    'paymob' => [
+        // env('X', 'default') only falls back when the key is fully absent —
+        // both .env and .env.example ship PAYMOB_API_BASE= blank (as a
+        // discoverable override point), which env() treats as "set to ''",
+        // not "use the default". `?:` catches that case too.
+        'api_base' => env('PAYMOB_API_BASE') ?: 'https://accept.paymob.com',
+    ],
 
     /*
     |--------------------------------------------------------------------------

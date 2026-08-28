@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\OverviewController as AdminOverviewController;
 use App\Http\Controllers\Admin\PaymentConnectionController;
+use App\Http\Controllers\Admin\PaymobConnectionController;
 use App\Http\Controllers\Admin\ReconciliationController;
 use App\Http\Controllers\Admin\WalletAdjustmentController;
 use App\Http\Controllers\Admin\WhatsappLogController;
@@ -22,6 +23,7 @@ use App\Http\Controllers\Client\WalletController;
 use App\Http\Controllers\Gateway\AiController as GatewayAiController;
 use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
 use App\Http\Controllers\Gateway\WhatsAppController as GatewayWhatsAppController;
+use App\Http\Controllers\Webhooks\PaymobWebhookController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\Webhooks\TapWebhookController;
 use App\Http\Controllers\Webhooks\WhatsappWebhookController;
@@ -53,6 +55,7 @@ Route::prefix('v1')->middleware(['api-key', 'throttle:60,1'])->group(function ()
 */
 Route::post('/webhooks/stripe', [StripeWebhookController::class, 'handle']);
 Route::post('/webhooks/tap', [TapWebhookController::class, 'handle']);
+Route::post('/webhooks/paymob', [PaymobWebhookController::class, 'handle']);
 Route::get('/webhooks/whatsapp', [WhatsappWebhookController::class, 'verify']);
 Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive']);
 
@@ -130,6 +133,11 @@ Route::prefix('admin')->group(function () {
         Route::get('/payment/connection', [PaymentConnectionController::class, 'show']);
         Route::put('/payment/connection', [PaymentConnectionController::class, 'update']);
         Route::delete('/payment/connection', [PaymentConnectionController::class, 'destroy']);
+        Route::get('/payment/active-gateway', fn () => response()->json(['gateway' => config('pingly.payment_gateway')]));
+
+        Route::get('/paymob/connection', [PaymobConnectionController::class, 'show']);
+        Route::put('/paymob/connection', [PaymobConnectionController::class, 'update']);
+        Route::delete('/paymob/connection', [PaymobConnectionController::class, 'destroy']);
 
         Route::get('/audit-log', [AuditLogController::class, 'index']);
     });

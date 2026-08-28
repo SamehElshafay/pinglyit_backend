@@ -51,4 +51,14 @@ return [
         'publishable_key' => env('TAP_PUBLISHABLE_KEY'),
     ],
 
+    // Wallet top-ups, take two: Tap's onboarding needs a bank account we
+    // don't have yet, so Paymob (Egyptian, CBE-licensed, accepted an
+    // individual account with just a national ID + IBAN — no commercial
+    // register needed at this volume) is the one actually reachable today.
+    'paymob' => [
+        'secret_key' => env('PAYMOB_SECRET_KEY'),
+        'public_key' => env('PAYMOB_PUBLIC_KEY'),
+        'hmac_secret' => env('PAYMOB_HMAC_SECRET'),
+    ],
+
 ];
