@@ -46,15 +46,17 @@ class ServiceController extends Controller
     {
         $company = $request->user()->company;
 
-        // Deliberately no multiplier here — the client sees tokens/credits
-        // used and their balance, never the internal rate they're billed at.
+        // Deliberately no multiplier, and no raw OpenRouter token count —
+        // "credits" is Pingly's own billing unit, not a claim that it equals
+        // what OpenRouter itself counted (real_tokens × multiplier would
+        // let anyone who knows the real count back out the multiplier).
         return response()->json([
             'balance' => (float) ($company->wallet->balance ?? 0),
             'usage' => $company->usageEvents()->where('service_type', ServiceType::Ai)->latest()->limit(25)->get()
                 ->map(fn ($e) => [
                     'time' => $e->created_at,
                     'model' => $e->metadata['model'] ?? null,
-                    'tokens' => $e->metadata['billed_tokens'] ?? null,
+                    'credits' => $e->metadata['billed_tokens'] ?? null,
                 ]),
         ]);
     }
@@ -128,6 +130,14 @@ class ServiceController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response()->json($result);
+        // Whitelisted, not a passthrough of $result — OpenRouter's raw
+        // response carries a `usage` block with the real token count, which
+        // next to the credits shown on the usage screen would hand anyone
+        // the multiplier for free (real_tokens vs. credits charged).
+        return response()->json([
+            'id' => $result['id'] ?? null,
+            'model' => $result['model'] ?? $data['model'],
+            'choices' => $result['choices'] ?? [],
+        ]);
     }
 }
