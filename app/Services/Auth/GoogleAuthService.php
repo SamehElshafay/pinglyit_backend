@@ -2,6 +2,7 @@
 
 namespace App\Services\Auth;
 
+use App\Mail\WelcomeMail;
 use App\Models\Company;
 use App\Models\PlatformSetting;
 use App\Models\User;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use RuntimeException;
 use UnexpectedValueException;
@@ -135,7 +137,7 @@ class GoogleAuthService
     {
         $companyName = filled($claims->name ?? null) ? "{$claims->name}'s Company" : 'My Company';
 
-        return DB::transaction(function () use ($claims, $companyName) {
+        $user = DB::transaction(function () use ($claims, $companyName) {
             $company = Company::create([
                 'name' => $companyName,
                 'contact_email' => $claims->email,
@@ -143,7 +145,7 @@ class GoogleAuthService
 
             $company->wallet()->create(['balance' => 0, 'currency' => 'USD']);
 
-            return $company->users()->create([
+            $user = $company->users()->create([
                 'name' => $claims->name ?? $claims->email,
                 'email' => $claims->email,
                 'google_id' => $claims->sub,
@@ -154,6 +156,16 @@ class GoogleAuthService
                 // checks anywhere else in the app.
                 'password' => Hash::make(Str::random(40)),
             ]);
+
+            $user->setRelation('company', $company); // avoids an extra query — WelcomeMail greets them by company name
+
+            return $user;
         });
+
+        // Same welcome email a password signup gets (RegisterController::store())
+        // — this Google sign-in *is* the signup, so it deserves the same one.
+        Mail::to($user->email)->send(new WelcomeMail($user));
+
+        return $user;
     }
 }

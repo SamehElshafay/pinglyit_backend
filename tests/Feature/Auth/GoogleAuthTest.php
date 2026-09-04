@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Mail\WelcomeMail;
 use App\Models\Company;
 use App\Models\PlatformSetting;
 use App\Models\User;
 use Firebase\JWT\JWT;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use OpenSSLAsymmetricKey;
 use Tests\TestCase;
 
@@ -103,6 +105,15 @@ class GoogleAuthTest extends TestCase
         $this->assertEquals('0.0000', $user->company->wallet->balance);
     }
 
+    public function test_a_brand_new_google_signin_sends_a_welcome_email(): void
+    {
+        Mail::fake();
+
+        $this->postJson('/api/auth/google', ['credential' => $this->idToken()])->assertOk();
+
+        Mail::assertSent(WelcomeMail::class, fn (WelcomeMail $mail) => $mail->hasTo('newperson@gmail.com'));
+    }
+
     public function test_a_google_signin_matching_an_existing_email_logs_into_that_account(): void
     {
         $company = Company::factory()->create();
@@ -115,6 +126,19 @@ class GoogleAuthTest extends TestCase
         $response->assertOk()->assertJsonPath('user.id', $existing->id);
         $this->assertSame(1, User::where('email', 'already-here@gmail.com')->count()); // no duplicate created
         $this->assertSame('google-sub-123456', $existing->fresh()->google_id); // linked
+    }
+
+    public function test_a_google_signin_matching_an_existing_email_does_not_send_a_welcome_email(): void
+    {
+        Mail::fake();
+        $company = Company::factory()->create();
+        User::factory()->create(['company_id' => $company->id, 'email' => 'already-here@gmail.com']);
+
+        $this->postJson('/api/auth/google', [
+            'credential' => $this->idToken(['email' => 'already-here@gmail.com']),
+        ])->assertOk();
+
+        Mail::assertNothingSent(); // this is a login into an existing account, not a signup
     }
 
     public function test_rejects_a_token_with_the_wrong_audience(): void

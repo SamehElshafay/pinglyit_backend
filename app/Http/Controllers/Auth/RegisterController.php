@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Mail\WelcomeMail;
 use App\Models\Company;
 use App\Services\Auth\JwtService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 
 class RegisterController extends Controller
 {
@@ -41,6 +43,12 @@ class RegisterController extends Controller
 
             return [$company, $user];
         });
+
+        $user->setRelation('company', $company); // avoids an extra query — the mail template greets them by company name
+
+        // MAIL_MAILER=log until real SMTP creds exist — same
+        // fail-clean-when-unconfigured pattern as PasswordResetMail.
+        Mail::to($user->email)->send(new WelcomeMail($user));
 
         return response()->json([
             'token' => $this->jwt->issue($user, 'user')['token'],
