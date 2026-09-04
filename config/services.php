@@ -69,4 +69,11 @@ return [
         'usd_to_egp_rate' => env('PAYMOB_USD_TO_EGP_RATE'),
     ],
 
+    // "Sign in with Google" for user_website (docs: GoogleAuthService).
+    // Just a Client ID — Google designs it to be public/embedded in
+    // frontend JS, no client secret involved in this flow at all.
+    'google' => [
+        'client_id' => env('GOOGLE_OAUTH_CLIENT_ID'),
+    ],
+
 ];

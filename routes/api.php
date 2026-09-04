@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\AiLogController;
 use App\Http\Controllers\Admin\AiPricingController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ClientController;
+use App\Http\Controllers\Admin\GoogleConnectionController;
 use App\Http\Controllers\Admin\OverviewController as AdminOverviewController;
 use App\Http\Controllers\Admin\PaymentConnectionController;
 use App\Http\Controllers\Admin\PaymobConnectionController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\Admin\WalletAdjustmentController;
 use App\Http\Controllers\Admin\WhatsappLogController;
 use App\Http\Controllers\Admin\WhatsappPricingController;
 use App\Http\Controllers\Auth\AdminAuthController;
+use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\RegisterController;
@@ -64,9 +66,15 @@ Route::post('/webhooks/whatsapp', [WhatsappWebhookController::class, 'receive'])
 | Client-facing auth (user_website) — no prefix, this is the "default" API
 |--------------------------------------------------------------------------
 */
+// A config read, not an auth attempt — hit on every visit to /login or
+// /signup, so it stays outside the throttled group below (unlike the
+// endpoints that actually exchange credentials for a session).
+Route::get('/auth/google/config', [GoogleAuthController::class, 'config']);
+
 Route::middleware('throttle:10,1')->group(function () {
     Route::post('/register', [RegisterController::class, 'store']);
     Route::post('/login', [LoginController::class, 'store']);
+    Route::post('/auth/google', [GoogleAuthController::class, 'store']);
     Route::post('/forgot-password', [PasswordResetController::class, 'forgot']);
     Route::post('/reset-password', [PasswordResetController::class, 'reset']);
 });
@@ -139,6 +147,10 @@ Route::prefix('admin')->group(function () {
         Route::get('/paymob/connection', [PaymobConnectionController::class, 'show']);
         Route::put('/paymob/connection', [PaymobConnectionController::class, 'update']);
         Route::delete('/paymob/connection', [PaymobConnectionController::class, 'destroy']);
+
+        Route::get('/google/connection', [GoogleConnectionController::class, 'show']);
+        Route::put('/google/connection', [GoogleConnectionController::class, 'update']);
+        Route::delete('/google/connection', [GoogleConnectionController::class, 'destroy']);
 
         Route::get('/audit-log', [AuditLogController::class, 'index']);
     });
