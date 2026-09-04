@@ -84,6 +84,7 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services', [ServiceController::class, 'index']);
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
     Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);
+    Route::put('/services/whatsapp/autoreply', [ServiceController::class, 'updateWhatsappAutoReply']);
     Route::get('/services/ai', [ServiceController::class, 'ai']);
     Route::get('/services/ai/models', [ServiceController::class, 'aiModels']);
     Route::post('/services/ai/chat', [ServiceController::class, 'chatAi']);

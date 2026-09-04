@@ -28,9 +28,10 @@ class ServiceController extends Controller
     public function whatsapp(Request $request)
     {
         $company = $request->user()->company;
+        $account = $company->whatsappAccounts()->where('status', 'connected')->first();
 
         return response()->json([
-            'connected' => $company->whatsappAccounts()->where('status', 'connected')->exists(),
+            'connected' => (bool) $account,
             'accounts' => $company->whatsappAccounts,
             'usage' => $company->usageEvents()->where('service_type', ServiceType::WhatsApp)->latest()->limit(25)->get()
                 ->map(fn ($e) => [
@@ -39,6 +40,52 @@ class ServiceController extends Controller
                     'country' => $e->metadata['country'] ?? null,
                     'cost' => (float) $e->billed_amount_to_client,
                 ]),
+            // The actual "connect AI to WhatsApp" feature — see
+            // WhatsappAutoReplyService. autoreply_models is the same
+            // priced-for-this-client catalog the AI Gateway page already uses.
+            'autoreply' => $account ? [
+                'enabled' => $account->ai_autoreply_enabled,
+                'model' => $account->ai_autoreply_model,
+                'system_prompt' => $account->ai_autoreply_system_prompt,
+            ] : null,
+            'autoreply_models' => $this->ai->availableModelsFor($company),
+        ]);
+    }
+
+    /**
+     * Turn Pingly's WhatsApp AI auto-reply on/off for this company's
+     * connected number, and configure what it uses to reply — see
+     * WhatsappAutoReplyService for what actually happens with these once set.
+     */
+    public function updateWhatsappAutoReply(Request $request)
+    {
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+            'model' => ['nullable', 'string'],
+            'system_prompt' => ['nullable', 'string', 'max:4000'],
+        ]);
+
+        $company = $request->user()->company;
+        $account = $company->whatsappAccounts()->where('status', 'connected')->first();
+
+        if (! $account) {
+            return response()->json(['message' => 'Connect a WhatsApp number first.'], 422);
+        }
+
+        if ($data['enabled'] && blank($data['model'] ?? null)) {
+            return response()->json(['message' => 'Pick a model before turning auto-reply on.'], 422);
+        }
+
+        $account->update([
+            'ai_autoreply_enabled' => $data['enabled'],
+            'ai_autoreply_model' => $data['model'] ?? null,
+            'ai_autoreply_system_prompt' => $data['system_prompt'] ?? null,
+        ]);
+
+        return response()->json([
+            'enabled' => $account->ai_autoreply_enabled,
+            'model' => $account->ai_autoreply_model,
+            'system_prompt' => $account->ai_autoreply_system_prompt,
         ]);
     }
 

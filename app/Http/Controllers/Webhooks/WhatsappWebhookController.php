@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Models\UsageEvent;
 use App\Models\WhatsappAccount;
+use App\Services\WhatsApp\WhatsappAutoReplyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -16,6 +17,8 @@ use Illuminate\Support\Facades\Log;
  */
 class WhatsappWebhookController extends Controller
 {
+    public function __construct(private readonly WhatsappAutoReplyService $autoReply) {}
+
     /**
      * The one-time handshake Meta does when you save the webhook URL in
      * the App Dashboard. Must echo back hub_challenge as plain text.
@@ -58,6 +61,13 @@ class WhatsappWebhookController extends Controller
                             'billed_amount_to_client' => 0,
                             'metadata' => ['category' => 'inbound', 'country' => null, 'from' => $message['from'] ?? null],
                         ]);
+
+                        // Auto-reply only ever fires for plain text messages
+                        // today — see WhatsappAutoReplyService's docblock.
+                        $text = $message['text']['body'] ?? null;
+                        if (($message['type'] ?? null) === 'text' && filled($text) && filled($message['from'] ?? null)) {
+                            $this->autoReply->handleInboundMessage($account, $message['from'], $text);
+                        }
                     } else {
                         Log::warning('WhatsApp inbound message for unknown phone_number_id', ['phone_number_id' => $phoneNumberId]);
                     }
