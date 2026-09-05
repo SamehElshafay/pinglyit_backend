@@ -26,6 +26,9 @@ class RegisterController extends Controller
             'company_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email', 'unique:companies,contact_email'],
             'password' => ['required', 'string', 'min:8'],
+            // A real, timestamped consent record — not just a UI gate — see
+            // the terms_accepted_at migration's docblock.
+            'terms_accepted' => ['required', 'accepted'],
         ]);
 
         DB::transaction(function () use ($data) {
@@ -40,6 +43,7 @@ class RegisterController extends Controller
                 'name' => $data['company_name'],
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
+                'terms_accepted_at' => now(),
             ]);
         });
 

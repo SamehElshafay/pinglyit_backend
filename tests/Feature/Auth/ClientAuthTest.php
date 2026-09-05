@@ -16,13 +16,19 @@ class ClientAuthTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_register_creates_a_company_and_an_unverified_user_but_no_token_yet(): void
+    private function registerPayload(array $overrides = []): array
     {
-        $response = $this->postJson('/api/register', [
+        return array_merge([
             'company_name' => 'Acme Inc.',
             'email' => 'founder@acme.test',
             'password' => 'password123',
-        ]);
+            'terms_accepted' => true,
+        ], $overrides);
+    }
+
+    public function test_register_creates_a_company_and_an_unverified_user_but_no_token_yet(): void
+    {
+        $response = $this->postJson('/api/register', $this->registerPayload());
 
         $response->assertCreated()->assertJson(['email' => 'founder@acme.test']);
         $response->assertJsonMissing(['token']); // not usable until VerifyOtpController::verify()
@@ -34,17 +40,22 @@ class ClientAuthTest extends TestCase
         $user = User::where('email', 'founder@acme.test')->firstOrFail();
         $this->assertSame($company->id, $user->company_id);
         $this->assertNull($user->email_verified_at);
+        $this->assertNotNull($user->terms_accepted_at); // a real, timestamped consent record
+    }
+
+    public function test_register_requires_accepting_the_terms(): void
+    {
+        $this->postJson('/api/register', $this->registerPayload(['terms_accepted' => false]))
+            ->assertStatus(422);
+
+        $this->assertDatabaseMissing('users', ['email' => 'founder@acme.test']);
     }
 
     public function test_register_sends_an_otp_not_a_welcome_email(): void
     {
         Mail::fake();
 
-        $this->postJson('/api/register', [
-            'company_name' => 'Acme Inc.',
-            'email' => 'founder@acme.test',
-            'password' => 'password123',
-        ])->assertCreated();
+        $this->postJson('/api/register', $this->registerPayload())->assertCreated();
 
         Mail::assertSent(OtpMail::class, fn (OtpMail $mail) => $mail->hasTo('founder@acme.test'));
         Mail::assertNotSent(WelcomeMail::class); // that's VerifyOtpController::verify()'s job, once the code is actually entered
@@ -54,11 +65,7 @@ class ClientAuthTest extends TestCase
     {
         Mail::fake();
 
-        $this->postJson('/api/register', [
-            'company_name' => 'Acme Inc.',
-            'email' => 'founder@acme.test',
-            'password' => 'password123',
-        ])->assertCreated();
+        $this->postJson('/api/register', $this->registerPayload())->assertCreated();
 
         $otp = null;
         Mail::assertSent(OtpMail::class, function (OtpMail $mail) use (&$otp) {
@@ -78,11 +85,7 @@ class ClientAuthTest extends TestCase
     {
         Mail::fake();
 
-        $this->postJson('/api/register', [
-            'company_name' => 'Acme Inc.',
-            'email' => 'founder@acme.test',
-            'password' => 'password123',
-        ])->assertCreated();
+        $this->postJson('/api/register', $this->registerPayload())->assertCreated();
 
         $this->postJson('/api/verify-otp', ['email' => 'founder@acme.test', 'otp' => '000000'])
             ->assertStatus(422);
