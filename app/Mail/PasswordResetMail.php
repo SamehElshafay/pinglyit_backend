@@ -9,10 +9,9 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Sent by PasswordResetController::forgot(). Plain text only — no HTML
- * template exists yet, and this is the one transactional email the
- * platform sends today. MAIL_MAILER=log until real SMTP creds exist, same
- * fail-clean-when-unconfigured pattern as every other integration here.
+ * Sent by PasswordResetController::forgot(). Same branded HTML/text pair
+ * (with the shared banner — see WelcomeMail/OtpMail) as every other
+ * transactional email on the platform.
  */
 class PasswordResetMail extends Mailable
 {
@@ -27,6 +26,9 @@ class PasswordResetMail extends Mailable
 
     public function content(): Content
     {
-        return new Content(text: 'emails.password-reset-text');
+        return new Content(
+            html: 'emails.password-reset',
+            text: 'emails.password-reset-text',
+        );
     }
 }
