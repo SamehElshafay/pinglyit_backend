@@ -114,6 +114,29 @@ class GoogleAuthTest extends TestCase
         Mail::assertSent(WelcomeMail::class, fn (WelcomeMail $mail) => $mail->hasTo('newperson@gmail.com'));
     }
 
+    public function test_a_brand_new_google_signin_is_verified_immediately_with_no_otp_step(): void
+    {
+        $this->postJson('/api/auth/google', ['credential' => $this->idToken()])->assertOk();
+
+        $this->assertNotNull(User::where('email', 'newperson@gmail.com')->first()->email_verified_at);
+    }
+
+    public function test_a_google_signin_matching_an_unverified_account_verifies_it_and_sends_the_welcome_email(): void
+    {
+        Mail::fake();
+        $company = Company::factory()->create();
+        // A password signup that never entered its OTP — Google re-proving
+        // ownership of the same inbox completes it instead.
+        User::factory()->unverified()->create(['company_id' => $company->id, 'email' => 'already-here@gmail.com']);
+
+        $this->postJson('/api/auth/google', [
+            'credential' => $this->idToken(['email' => 'already-here@gmail.com']),
+        ])->assertOk();
+
+        $this->assertNotNull(User::where('email', 'already-here@gmail.com')->first()->email_verified_at);
+        Mail::assertSent(WelcomeMail::class, fn (WelcomeMail $mail) => $mail->hasTo('already-here@gmail.com'));
+    }
+
     public function test_a_google_signin_matching_an_existing_email_logs_into_that_account(): void
     {
         $company = Company::factory()->create();

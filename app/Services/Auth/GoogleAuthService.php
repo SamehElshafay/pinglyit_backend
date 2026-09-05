@@ -82,6 +82,17 @@ class GoogleAuthService
                 $user->update(['google_id' => $claims->sub]);
             }
 
+            // A password signup that never finished email verification
+            // (see email_otps) — Google re-proving ownership of this same
+            // inbox completes it just as well as entering the OTP would
+            // have, so this is treated as the same "signup finally
+            // completes" moment: mark verified, send the same welcome
+            // email a completed OTP flow would have sent.
+            if (blank($user->email_verified_at)) {
+                $user->update(['email_verified_at' => now()]);
+                Mail::to($user->email)->send(new WelcomeMail($user));
+            }
+
             return $user;
         }
 
@@ -149,6 +160,9 @@ class GoogleAuthService
                 'name' => $claims->name ?? $claims->email,
                 'email' => $claims->email,
                 'google_id' => $claims->sub,
+                // Already checked in verify() above — no OTP step needed,
+                // Google itself is the verification.
+                'email_verified_at' => now(),
                 // Never used to log in — Google is this account's only way
                 // in unless the client sets a real password later from
                 // Account settings. A random value keeps `password` NOT

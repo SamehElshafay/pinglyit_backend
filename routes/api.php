@@ -18,6 +18,7 @@ use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\RegisterController;
+use App\Http\Controllers\Auth\VerifyOtpController;
 use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ServiceController;
@@ -73,6 +74,8 @@ Route::get('/auth/google/config', [GoogleAuthController::class, 'config']);
 
 Route::middleware('throttle:10,1')->group(function () {
     Route::post('/register', [RegisterController::class, 'store']);
+    Route::post('/verify-otp', [VerifyOtpController::class, 'verify']);
+    Route::post('/resend-otp', [VerifyOtpController::class, 'resend']);
     Route::post('/login', [LoginController::class, 'store']);
     Route::post('/auth/google', [GoogleAuthController::class, 'store']);
     Route::post('/forgot-password', [PasswordResetController::class, 'forgot']);

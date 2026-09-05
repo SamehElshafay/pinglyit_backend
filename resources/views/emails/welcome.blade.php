@@ -11,12 +11,7 @@
 <td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 12px 32px -12px rgba(15,23,42,0.15);">
 
-<!-- Brand banner -->
-<tr>
-<td style="background-color:#0d9488; background-image:linear-gradient(135deg,#0d9488 0%,#134e4a 100%); padding:32px 40px;">
-<span style="font-size:22px; font-weight:700; color:#ffffff; letter-spacing:-0.3px;">Pingly</span>
-</td>
-</tr>
+@include('emails.partials.banner')
 
 <!-- Body -->
 <tr>
