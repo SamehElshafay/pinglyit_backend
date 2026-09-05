@@ -53,6 +53,26 @@ class Company extends Model
         return $this->hasMany(ApiKey::class);
     }
 
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
+    public function offers(): HasMany
+    {
+        return $this->hasMany(Offer::class);
+    }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
+
+    public function whatsappConversations(): HasMany
+    {
+        return $this->hasMany(WhatsappConversation::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'active';

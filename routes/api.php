@@ -23,8 +23,14 @@ use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ServiceController;
 use App\Http\Controllers\Client\WalletController;
+use App\Http\Controllers\Client\OfferController;
+use App\Http\Controllers\Client\OrderController;
+use App\Http\Controllers\Client\ProductController;
 use App\Http\Controllers\Gateway\AiController as GatewayAiController;
 use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
+use App\Http\Controllers\Gateway\OfferController as GatewayOfferController;
+use App\Http\Controllers\Gateway\OrderController as GatewayOrderController;
+use App\Http\Controllers\Gateway\ProductController as GatewayProductController;
 use App\Http\Controllers\Gateway\WhatsAppController as GatewayWhatsAppController;
 use App\Http\Controllers\Webhooks\PaymobWebhookController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
@@ -45,6 +51,22 @@ Route::prefix('v1')->middleware(['api-key', 'throttle:60,1'])->group(function ()
     Route::get('/models', [GatewayAiController::class, 'models']);
     Route::post('/ai/chat', [GatewayAiController::class, 'chat']);
     Route::post('/whatsapp/send', [GatewayWhatsAppController::class, 'send']);
+
+    // The AI Commerce Assistant's catalog + order tracking (see
+    // AiCommerceAgentService) — "من خلال الـ APIs او من الداشبورد" was the
+    // actual requirement, so this mirrors the /services/* routes below.
+    Route::get('/products', [GatewayProductController::class, 'index']);
+    Route::post('/products', [GatewayProductController::class, 'store']);
+    Route::put('/products/{product}', [GatewayProductController::class, 'update']);
+    Route::delete('/products/{product}', [GatewayProductController::class, 'destroy']);
+
+    Route::get('/offers', [GatewayOfferController::class, 'index']);
+    Route::post('/offers', [GatewayOfferController::class, 'store']);
+    Route::put('/offers/{offer}', [GatewayOfferController::class, 'update']);
+    Route::delete('/offers/{offer}', [GatewayOfferController::class, 'destroy']);
+
+    Route::get('/orders', [GatewayOrderController::class, 'index']);
+    Route::get('/orders/{order}', [GatewayOrderController::class, 'show']);
 });
 
 /*
@@ -96,6 +118,7 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
     Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);
     Route::put('/services/whatsapp/autoreply', [ServiceController::class, 'updateWhatsappAutoReply']);
+    Route::put('/services/whatsapp/commerce', [ServiceController::class, 'updateWhatsappCommerce']);
     Route::get('/services/ai', [ServiceController::class, 'ai']);
     Route::get('/services/ai/models', [ServiceController::class, 'aiModels']);
     Route::post('/services/ai/chat', [ServiceController::class, 'chatAi']);
@@ -103,6 +126,22 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/api-keys', [ApiKeyController::class, 'index']);
     Route::post('/api-keys', [ApiKeyController::class, 'store']);
     Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy']);
+
+    // The AI Commerce Assistant's catalog + order tracking, dashboard side
+    // — same resources as the /v1/* gateway routes above, see ProductController.
+    Route::get('/products', [ProductController::class, 'index']);
+    Route::post('/products', [ProductController::class, 'store']);
+    Route::put('/products/{product}', [ProductController::class, 'update']);
+    Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+
+    Route::get('/offers', [OfferController::class, 'index']);
+    Route::post('/offers', [OfferController::class, 'store']);
+    Route::put('/offers/{offer}', [OfferController::class, 'update']);
+    Route::delete('/offers/{offer}', [OfferController::class, 'destroy']);
+
+    Route::get('/orders', [OrderController::class, 'index']);
+    Route::get('/orders/{order}', [OrderController::class, 'show']);
+    Route::put('/orders/{order}/status', [OrderController::class, 'updateStatus']);
 });
 
 /*

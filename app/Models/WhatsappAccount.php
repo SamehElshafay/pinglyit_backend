@@ -9,7 +9,7 @@ class WhatsappAccount extends Model
 {
     protected $fillable = [
         'company_id', 'waba_id', 'phone_number_id', 'phone_number', 'status', 'connected_at',
-        'ai_autoreply_enabled', 'ai_autoreply_model', 'ai_autoreply_system_prompt',
+        'ai_autoreply_enabled', 'ai_autoreply_model', 'ai_autoreply_system_prompt', 'ai_commerce_enabled',
     ];
 
     protected function casts(): array
@@ -17,6 +17,7 @@ class WhatsappAccount extends Model
         return [
             'connected_at' => 'datetime',
             'ai_autoreply_enabled' => 'boolean',
+            'ai_commerce_enabled' => 'boolean',
         ];
     }
 

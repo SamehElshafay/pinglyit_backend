@@ -48,6 +48,17 @@ class ServiceController extends Controller
                 'model' => $account->ai_autoreply_model,
                 'system_prompt' => $account->ai_autoreply_system_prompt,
             ] : null,
+            // The other, separate AI+WhatsApp feature — see
+            // AiCommerceAgentService's docblock for why this isn't just
+            // "autoreply with a catalog". Reuses ai_autoreply_model/
+            // system_prompt (model choice and brand tone are orthogonal to
+            // which mode is on) but its own enabled flag — the two are
+            // mutually exclusive per number.
+            'commerce' => $account ? [
+                'enabled' => $account->ai_commerce_enabled,
+                'model' => $account->ai_autoreply_model,
+                'system_prompt' => $account->ai_autoreply_system_prompt,
+            ] : null,
             'autoreply_models' => $this->ai->availableModelsFor($company),
         ]);
     }
@@ -84,6 +95,44 @@ class ServiceController extends Controller
 
         return response()->json([
             'enabled' => $account->ai_autoreply_enabled,
+            'model' => $account->ai_autoreply_model,
+            'system_prompt' => $account->ai_autoreply_system_prompt,
+        ]);
+    }
+
+    /**
+     * Turn the AI Commerce Assistant on/off — mutually exclusive with plain
+     * auto-reply per number (WhatsappWebhookController checks commerce
+     * first), so turning this on doesn't also require turning the other
+     * off; it just wins if both happen to be on.
+     */
+    public function updateWhatsappCommerce(Request $request)
+    {
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+            'model' => ['nullable', 'string'],
+            'system_prompt' => ['nullable', 'string', 'max:4000'],
+        ]);
+
+        $company = $request->user()->company;
+        $account = $company->whatsappAccounts()->where('status', 'connected')->first();
+
+        if (! $account) {
+            return response()->json(['message' => 'Connect a WhatsApp number first.'], 422);
+        }
+
+        if ($data['enabled'] && blank($data['model'] ?? null)) {
+            return response()->json(['message' => 'Pick a model before turning the AI Commerce Assistant on.'], 422);
+        }
+
+        $account->update([
+            'ai_commerce_enabled' => $data['enabled'],
+            'ai_autoreply_model' => $data['model'] ?? $account->ai_autoreply_model,
+            'ai_autoreply_system_prompt' => $data['system_prompt'] ?? null,
+        ]);
+
+        return response()->json([
+            'enabled' => $account->ai_commerce_enabled,
             'model' => $account->ai_autoreply_model,
             'system_prompt' => $account->ai_autoreply_system_prompt,
         ]);

@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Models\UsageEvent;
 use App\Models\WhatsappAccount;
+use App\Services\WhatsApp\AiCommerceAgentService;
 use App\Services\WhatsApp\WhatsappAutoReplyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +18,10 @@ use Illuminate\Support\Facades\Log;
  */
 class WhatsappWebhookController extends Controller
 {
-    public function __construct(private readonly WhatsappAutoReplyService $autoReply) {}
+    public function __construct(
+        private readonly WhatsappAutoReplyService $autoReply,
+        private readonly AiCommerceAgentService $commerceAgent,
+    ) {}
 
     /**
      * The one-time handshake Meta does when you save the webhook URL in
@@ -62,11 +66,18 @@ class WhatsappWebhookController extends Controller
                             'metadata' => ['category' => 'inbound', 'country' => null, 'from' => $message['from'] ?? null],
                         ]);
 
-                        // Auto-reply only ever fires for plain text messages
-                        // today — see WhatsappAutoReplyService's docblock.
+                        // Both AI modes only ever fire for plain text messages
+                        // today. Commerce and plain auto-reply are mutually
+                        // exclusive per number — see the ai_commerce_enabled
+                        // migration's docblock for why commerce wins if both
+                        // are somehow on.
                         $text = $message['text']['body'] ?? null;
                         if (($message['type'] ?? null) === 'text' && filled($text) && filled($message['from'] ?? null)) {
-                            $this->autoReply->handleInboundMessage($account, $message['from'], $text);
+                            if ($account->ai_commerce_enabled) {
+                                $this->commerceAgent->handleInboundMessage($account, $message['from'], $text);
+                            } else {
+                                $this->autoReply->handleInboundMessage($account, $message['from'], $text);
+                            }
                         }
                     } else {
                         Log::warning('WhatsApp inbound message for unknown phone_number_id', ['phone_number_id' => $phoneNumberId]);
