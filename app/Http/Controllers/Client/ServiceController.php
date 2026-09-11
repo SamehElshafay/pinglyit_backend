@@ -22,8 +22,13 @@ class ServiceController extends Controller
     {
         $company = $request->user()->company;
 
+        // WhatsApp Gateway is deliberately left out of this list — it's
+        // hidden from the client dashboard entirely for now. Nothing about
+        // the service itself is gone (every endpoint below still works, and
+        // admins still see it); it just isn't offered on any client-facing
+        // screen, so it shouldn't be advertised in this list either. Add the
+        // entry back here when it's offered again.
         return response()->json([
-            ['key' => 'whatsapp', 'name' => ServiceType::WhatsApp->label(), 'enabled' => $this->whatsapp->isEnabledFor($company)],
             ['key' => 'ai', 'name' => ServiceType::Ai->label(), 'enabled' => $this->ai->isEnabledFor($company)],
         ]);
     }
