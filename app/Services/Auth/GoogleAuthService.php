@@ -84,6 +84,13 @@ class GoogleAuthService
                 $user->update(['google_id' => $claims->sub]);
             }
 
+            // Refreshed on every Google sign-in, not just the first —
+            // Google's own `picture` URL can change (a new profile photo),
+            // and this is the only source avatar_url ever comes from.
+            if (filled($claims->picture ?? null) && $user->avatar_url !== $claims->picture) {
+                $user->update(['avatar_url' => $claims->picture]);
+            }
+
             // A password signup that never finished email verification
             // (see email_otps) — Google re-proving ownership of this same
             // inbox completes it just as well as entering the OTP would
@@ -162,6 +169,7 @@ class GoogleAuthService
                 'name' => $claims->name ?? $claims->email,
                 'email' => $claims->email,
                 'google_id' => $claims->sub,
+                'avatar_url' => $claims->picture ?? null,
                 // Already checked in verify() above — no OTP step needed,
                 // Google itself is the verification.
                 'email_verified_at' => now(),

@@ -68,6 +68,7 @@ class GoogleAuthTest extends TestCase
             'email' => 'newperson@gmail.com',
             'email_verified' => true,
             'name' => 'New Person',
+            'picture' => 'https://lh3.googleusercontent.com/a/default-user=s96-c',
             'iat' => time(),
             'exp' => time() + 3600,
         ], $overrides);
@@ -103,6 +104,36 @@ class GoogleAuthTest extends TestCase
         $this->assertNotNull($user->company);
         $this->assertNotNull($user->company->wallet);
         $this->assertEquals('0.0000', $user->company->wallet->balance);
+    }
+
+    public function test_a_brand_new_google_signin_stores_the_profile_picture(): void
+    {
+        $response = $this->postJson('/api/auth/google', ['credential' => $this->idToken()]);
+
+        $response->assertJsonPath('user.avatar_url', 'https://lh3.googleusercontent.com/a/default-user=s96-c');
+        $this->assertSame(
+            'https://lh3.googleusercontent.com/a/default-user=s96-c',
+            User::where('email', 'newperson@gmail.com')->firstOrFail()->avatar_url,
+        );
+    }
+
+    public function test_a_google_signin_into_an_existing_account_backfills_and_refreshes_the_picture(): void
+    {
+        $company = Company::factory()->create();
+        $existing = User::factory()->create([
+            'company_id' => $company->id,
+            'email' => 'already-here@gmail.com',
+            'avatar_url' => 'https://old-picture.example/stale.jpg',
+        ]);
+
+        $this->postJson('/api/auth/google', [
+            'credential' => $this->idToken(['email' => 'already-here@gmail.com', 'picture' => 'https://lh3.googleusercontent.com/a/new-photo=s96-c']),
+        ])->assertOk();
+
+        // Google's own picture URL is the only source of truth for this
+        // field — a fresher one from Google replaces whatever was stored,
+        // never the other way around.
+        $this->assertSame('https://lh3.googleusercontent.com/a/new-photo=s96-c', $existing->fresh()->avatar_url);
     }
 
     public function test_a_brand_new_google_signin_sends_a_welcome_email(): void

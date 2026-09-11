@@ -45,7 +45,7 @@ class LoginController extends Controller
 
         return response()->json([
             'token' => $this->jwt->issue($user, 'user')['token'],
-            'user' => $user->only('id', 'name', 'email', 'company_id'),
+            'user' => $user->only('id', 'name', 'email', 'company_id', 'avatar_url'),
         ]);
     }
 
@@ -61,7 +61,7 @@ class LoginController extends Controller
         $user = $request->user()->load('company.wallet');
 
         return response()->json([
-            'user' => $user->only('id', 'name', 'email'),
+            'user' => $user->only('id', 'name', 'email', 'avatar_url'),
             'company' => $user->company,
         ]);
     }

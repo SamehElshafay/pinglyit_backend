@@ -48,7 +48,7 @@ class GoogleAuthController extends Controller
 
         return response()->json([
             'token' => $this->jwt->issue($user, 'user')['token'],
-            'user' => $user->only('id', 'name', 'email', 'company_id'),
+            'user' => $user->only('id', 'name', 'email', 'company_id', 'avatar_url'),
         ]);
     }
 }
