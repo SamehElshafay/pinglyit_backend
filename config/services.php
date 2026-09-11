@@ -51,6 +51,14 @@ return [
         'publishable_key' => env('TAP_PUBLISHABLE_KEY'),
     ],
 
+    // Wallet top-ups, no bank account needed at all — cards/EGP not
+    // required, just a KYC'd merchant account + domain confirmation.
+    // Switch PAYMENT_GATEWAY=cryptomus to use these instead.
+    'cryptomus' => [
+        'merchant_id' => env('CRYPTOMUS_MERCHANT_ID'),
+        'api_key' => env('CRYPTOMUS_API_KEY'), // the *Payment* API key, not Payout
+    ],
+
     // Wallet top-ups, take two: Tap's onboarding needs a bank account we
     // don't have yet, so Paymob (Egyptian, CBE-licensed, accepted an
     // individual account with just a national ID + IBAN — no commercial

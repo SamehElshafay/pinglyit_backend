@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Contracts\PaymentGateway;
+use App\Services\Payments\CryptomusGateway;
 use App\Services\Payments\PaymobGateway;
 use App\Services\Payments\StripeGateway;
 use App\Services\Payments\TapGateway;
@@ -22,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
             'stripe' => StripeGateway::class,
             'tap' => TapGateway::class,
             'paymob' => PaymobGateway::class,
+            'cryptomus' => CryptomusGateway::class,
             default => PaymobGateway::class,
         });
     }

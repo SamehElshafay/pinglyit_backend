@@ -36,11 +36,13 @@ return [
     |--------------------------------------------------------------------------
     | Wallet top-up payment gateway
     |--------------------------------------------------------------------------
-    | 'stripe' | 'tap' | 'paymob' | 'none' (disables top-ups — WalletController
-    | falls back to a 501). Originally Tap (Gulf-focused revenue), but Tap's
-    | own onboarding needs a bank account that doesn't exist yet; Paymob
-    | (Egyptian, accepted an individual account today) is what's actually
-    | reachable right now — see AppServiceProvider for the bind. This is a
+    | 'stripe' | 'tap' | 'paymob' | 'cryptomus' | 'none' (disables top-ups —
+    | WalletController falls back to a 501). Originally Tap (Gulf-focused
+    | revenue), but Tap's own onboarding needs a bank account that doesn't
+    | exist yet; Paymob (Egyptian, accepted an individual account today) is
+    | what's actually reachable right now — see AppServiceProvider for the
+    | bind. Cryptomus (crypto/USDT) is the one option here that needs no
+    | bank account at all — see CryptomusGateway's docblock. This is a
     | one-time deployment choice, not a secret, so it stays here rather than
     | in the admin-managed PlatformSetting store (each gateway's own API keys
     | still live there, encrypted — see AiConnectionController's docblock).
