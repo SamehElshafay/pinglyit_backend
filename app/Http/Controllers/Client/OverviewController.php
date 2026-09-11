@@ -23,11 +23,11 @@ class OverviewController extends Controller
             'whatsapp_requests_this_period' => (clone $events)->where('service_type', ServiceType::WhatsApp)->count(),
             'ai_requests_this_period' => (clone $events)->where('service_type', ServiceType::Ai)->count(),
             'daily_usage' => $this->dailyUsage($company->id),
-            'recent_activity' => $company->usageEvents()->latest()->limit(10)->get()
-                ->map(fn ($e) => [
-                    'time' => $e->created_at,
-                    'event' => $e->service_type === ServiceType::WhatsApp ? 'WhatsApp message sent' : 'AI request',
-                ]),
+            // WhatsApp Gateway is hidden across the dashboard for now (see
+            // user_website's AppShell.vue nav) — excluded here too, so a
+            // logged event never resurfaces as a line of activity text.
+            'recent_activity' => $company->usageEvents()->where('service_type', ServiceType::Ai)->latest()->limit(10)->get()
+                ->map(fn ($e) => ['time' => $e->created_at, 'event' => 'AI request']),
         ]);
     }
 
