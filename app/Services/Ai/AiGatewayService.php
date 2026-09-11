@@ -160,12 +160,16 @@ class AiGatewayService
      * OpenRouter reports, whether that's a plain reply or a tool_call.
      *
      * @param  array<int, array<string, string>>  $messages
-     * @param  array<string, mixed>  $options  only 'tools' / 'tool_choice' are passed through today
+     * @param  array<string, mixed>  $options  'tools' / 'tool_choice' pass straight through; 'max_tokens' overrides the 4096 default below (not exposed via the public API today)
      */
     public function forward(Company $company, string $model, array $messages, array $options = []): array
     {
         if (! $this->isConfigured()) {
-            throw new RuntimeException('AI Gateway is not configured — add the OpenRouter key in the admin dashboard first.');
+            // Deliberately vendor-agnostic — this reaches clients directly
+            // (ServiceController::chatAi() and the public /v1/ai/chat both
+            // just return $e->getMessage() as-is), and which upstream
+            // Pingly resells through is never something a client should see.
+            throw new RuntimeException('AI Gateway is not configured yet — contact support.');
         }
 
         if (! $this->billing->hasSufficientBalance($company, 0.000001)) {
@@ -177,6 +181,12 @@ class AiGatewayService
             'messages' => $messages,
             'tools' => $options['tools'] ?? null,
             'tool_choice' => $options['tool_choice'] ?? null,
+            // Left unset, OpenRouter defaults to whatever ceiling the model
+            // itself allows (65,536 for some) — and then rejects the request
+            // outright if the account's remaining credit can't cover a
+            // completion that long, even for a two-line reply. Capped here
+            // so a normal request works on a normal balance.
+            'max_tokens' => $options['max_tokens'] ?? 4096,
         ], fn ($v) => $v !== null);
 
         try {
@@ -184,11 +194,18 @@ class AiGatewayService
                 ->timeout(60)
                 ->post(config('pingly.ai.openrouter_api_base').'/chat/completions', $body);
         } catch (ConnectionException $e) {
-            throw new RuntimeException("Couldn't reach OpenRouter: {$e->getMessage()}");
+            Log::error('Could not reach the AI provider.', ['reason' => $e->getMessage()]);
+
+            throw new RuntimeException("Couldn't reach the AI Gateway right now — try again shortly.");
         }
 
         if ($response->failed()) {
-            throw new RuntimeException('OpenRouter request failed: '.$response->body());
+            // The upstream's own error body is logged, never handed to the
+            // client raw — same reason as isConfigured()'s message above,
+            // plus it could contain the vendor's own error format/details.
+            Log::error('AI Gateway upstream request failed.', ['model' => $model, 'status' => $response->status(), 'body' => $response->body()]);
+
+            throw new RuntimeException('The AI Gateway request failed — try again, or try a different model.');
         }
 
         $data = $response->json();
