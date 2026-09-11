@@ -5,14 +5,17 @@ namespace App\Http\Controllers\Client;
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Services\Ai\AiGatewayService;
+use App\Services\WhatsApp\WhatsAppEmbeddedSignupService;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class ServiceController extends Controller
 {
     public function __construct(
         private readonly WhatsAppGatewayService $whatsapp,
         private readonly AiGatewayService $ai,
+        private readonly WhatsAppEmbeddedSignupService $embeddedSignup,
     ) {}
 
     public function index(Request $request)
@@ -61,6 +64,49 @@ class ServiceController extends Controller
             ] : null,
             'autoreply_models' => $this->ai->availableModelsFor($company),
         ]);
+    }
+
+    /**
+     * Public within the authenticated client area (not the pre-login public
+     * endpoint Google's equivalent is — connecting WhatsApp only ever
+     * happens from inside the dashboard) — just the App ID and Configuration
+     * ID the frontend's FB.login() call needs. Neither is a secret; see
+     * WhatsAppEmbeddedSignupService's docblock.
+     */
+    public function whatsappEmbeddedSignupConfig()
+    {
+        return response()->json([
+            'configured' => $this->embeddedSignup->isConfigured(),
+            'app_id' => $this->embeddedSignup->appId(),
+            'config_id' => $this->embeddedSignup->configId(),
+            'api_version' => config('pingly.whatsapp.api_version'),
+        ]);
+    }
+
+    /**
+     * The other half of WhatsAppEmbeddedSignupButton.vue's flow: the
+     * frontend hands back exactly what Meta gave it (the exchangeable
+     * `code`, plus the `waba_id`/`phone_number_id` from the postMessage
+     * session event) and this finishes the connection server-side — see
+     * WhatsAppEmbeddedSignupService::completeSignup().
+     */
+    public function connectWhatsapp(Request $request)
+    {
+        $data = $request->validate([
+            'code' => ['required', 'string'],
+            'waba_id' => ['required', 'string'],
+            'phone_number_id' => ['required', 'string'],
+        ]);
+
+        $company = $request->user()->company;
+
+        try {
+            $account = $this->embeddedSignup->completeSignup($company, $data['code'], $data['waba_id'], $data['phone_number_id']);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['message' => 'WhatsApp number connected.', 'phone_number' => $account->phone_number]);
     }
 
     /**
@@ -195,7 +241,7 @@ class ServiceController extends Controller
                 strtoupper($data['country']),
                 ['type' => 'text', 'text' => ['body' => $data['text']]],
             );
-        } catch (\RuntimeException $e) {
+        } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
@@ -230,7 +276,7 @@ class ServiceController extends Controller
                 'tools' => $data['tools'] ?? null,
                 'tool_choice' => $data['tool_choice'] ?? null,
             ]);
-        } catch (\RuntimeException $e) {
+        } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 

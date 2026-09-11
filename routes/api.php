@@ -120,6 +120,8 @@ Route::middleware(['jwt', 'client'])->group(function () {
 
     Route::get('/services', [ServiceController::class, 'index']);
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
+    Route::get('/services/whatsapp/embedded-signup/config', [ServiceController::class, 'whatsappEmbeddedSignupConfig']);
+    Route::post('/services/whatsapp/embedded-signup', [ServiceController::class, 'connectWhatsapp']);
     Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);
     Route::put('/services/whatsapp/autoreply', [ServiceController::class, 'updateWhatsappAutoReply']);
     Route::put('/services/whatsapp/commerce', [ServiceController::class, 'updateWhatsappCommerce']);
@@ -167,6 +169,8 @@ Route::prefix('admin')->group(function () {
         Route::get('/clients/{company}', [ClientController::class, 'show']);
         Route::get('/clients/{company}/api-keys', [ClientController::class, 'apiKeys']);
         Route::put('/clients/{company}/whatsapp-config', [ClientController::class, 'updateWhatsappConfig']);
+        Route::post('/clients/{company}/whatsapp-account', [ClientController::class, 'connectWhatsappAccount']);
+        Route::delete('/clients/{company}/whatsapp-account/{whatsappAccount}', [ClientController::class, 'disconnectWhatsappAccount']);
         Route::put('/clients/{company}/ai-config', [ClientController::class, 'updateAiConfig']);
 
         Route::get('/whatsapp/pricing', [WhatsappPricingController::class, 'show']);

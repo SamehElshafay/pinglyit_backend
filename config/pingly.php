@@ -18,6 +18,13 @@ return [
         // screen (Verify Token) — Meta echoes it back on setup to prove it's
         // really you configuring the endpoint.
         'webhook_verify_token' => env('META_WHATSAPP_WEBHOOK_VERIFY_TOKEN'),
+        // The Embedded Signup flow's own Configuration ID — created once
+        // Pingly is registered as a Meta Tech Provider (App Dashboard →
+        // WhatsApp → Embedded Signup → Configurations), separate from the
+        // App ID/Secret above. Not a secret (goes straight into the
+        // frontend's FB.login() call, same as app_id) — see
+        // WhatsAppEmbeddedSignupService's docblock.
+        'config_id' => env('META_WHATSAPP_CONFIG_ID'),
     ],
 
     /*

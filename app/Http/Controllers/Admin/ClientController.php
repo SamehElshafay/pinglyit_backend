@@ -10,6 +10,7 @@ use App\Services\Ai\AiGatewayService;
 use App\Services\Billing\ServiceConfigRepository;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class ClientController extends Controller
 {
@@ -94,6 +95,73 @@ class ClientController extends Controller
             'enabled' => $this->whatsapp->isEnabledFor($company),
             'pricing' => $this->whatsapp->pricingFor($company),
         ]]);
+    }
+
+    /**
+     * The manual fallback for connecting a client's WhatsApp number — the
+     * same thing a completed Embedded Signup would have done to
+     * whatsapp_accounts (see that migration's docblock), done by hand from
+     * the admin dashboard instead of self-service, for whenever Embedded
+     * Signup itself isn't set up (no Meta Tech Provider yet) or a client
+     * just needs help. `waba_id`/`phone_number_id` come from Meta App
+     * Dashboard → WhatsApp → API Setup for whichever number is being
+     * connected. Keyed on `waba_id`: connecting the same WABA again (a
+     * re-connect, or fixing a typo) updates that row instead of creating
+     * a duplicate.
+     */
+    public function connectWhatsappAccount(Request $request, Company $company)
+    {
+        $data = $request->validate([
+            'waba_id' => ['required', 'string'],
+            'phone_number_id' => ['required', 'string'],
+            'phone_number' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        $account = $company->whatsappAccounts()->updateOrCreate(
+            ['waba_id' => $data['waba_id']],
+            [
+                'phone_number_id' => $data['phone_number_id'],
+                'phone_number' => $data['phone_number'] ?? null,
+                'status' => 'connected',
+                'connected_at' => now(),
+            ],
+        );
+
+        AuditLog::record(
+            $request->user(),
+            'client.whatsapp_account.connect',
+            'Connected WhatsApp number'.($account->phone_number ? " {$account->phone_number}" : '')." for {$company->name}",
+            $company,
+            $data,
+        );
+
+        return response()->json(['accounts' => $company->whatsappAccounts()->get()]);
+    }
+
+    /**
+     * Marks a number disconnected rather than deleting the row — keeps its
+     * usage history (usage_events don't reference it directly, but the
+     * account itself is a record worth keeping) and matches what an actual
+     * Meta-side disconnect would leave behind.
+     */
+    public function disconnectWhatsappAccount(Request $request, Company $company, int $whatsappAccount)
+    {
+        $account = $company->whatsappAccounts()->find($whatsappAccount);
+
+        if (! $account) {
+            throw ValidationException::withMessages(['whatsapp_account' => 'No such WhatsApp number on this client.']);
+        }
+
+        $account->update(['status' => 'disconnected']);
+
+        AuditLog::record(
+            $request->user(),
+            'client.whatsapp_account.disconnect',
+            'Disconnected WhatsApp number'.($account->phone_number ? " {$account->phone_number}" : '')." for {$company->name}",
+            $company,
+        );
+
+        return response()->json(['accounts' => $company->whatsappAccounts()->get()]);
     }
 
     public function updateAiConfig(Request $request, Company $company)
