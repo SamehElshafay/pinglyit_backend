@@ -2,11 +2,12 @@
 
 namespace App\Services\Auth;
 
+use App\Exceptions\MailDeliveryException;
 use App\Mail\OtpMail;
+use App\Services\Mail\TransactionalMailer;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -25,10 +26,19 @@ class OtpService
 
     private const MAX_ATTEMPTS = 5;
 
+    public function __construct(private readonly TransactionalMailer $mailer) {}
+
     /**
      * (Re)issues a code for this email — used by both a fresh signup and a
      * resend, always overwriting whatever code existed before rather than
      * ever re-sending an old one.
+     *
+     * The one email on the platform that must not fail quietly: a code
+     * nobody receives leaves an account that can't be verified, can't be
+     * logged into, and can't be signed up for again. Callers are expected
+     * to let the failure abort whatever they were doing.
+     *
+     * @throws MailDeliveryException when the code can't be sent
      */
     public function issue(string $email): void
     {
@@ -39,7 +49,7 @@ class OtpService
             ['otp' => Hash::make($otp), 'attempts' => 0, 'created_at' => now()],
         );
 
-        Mail::to($email)->send(new OtpMail($otp));
+        $this->mailer->deliver($email, new OtpMail($otp));
     }
 
     /**

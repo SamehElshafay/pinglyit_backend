@@ -6,13 +6,13 @@ use App\Mail\WelcomeMail;
 use App\Models\Company;
 use App\Models\PlatformSetting;
 use App\Models\User;
+use App\Services\Mail\TransactionalMailer;
 use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use RuntimeException;
 use UnexpectedValueException;
@@ -40,6 +40,8 @@ class GoogleAuthService
     private const JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
 
     private const VALID_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
+
+    public function __construct(private readonly TransactionalMailer $mailer) {}
 
     public function clientId(): ?string
     {
@@ -90,7 +92,7 @@ class GoogleAuthService
             // email a completed OTP flow would have sent.
             if (blank($user->email_verified_at)) {
                 $user->update(['email_verified_at' => now()]);
-                Mail::to($user->email)->send(new WelcomeMail($user));
+                $this->mailer->attempt($user->email, new WelcomeMail($user));
             }
 
             return $user;
@@ -178,7 +180,9 @@ class GoogleAuthService
 
         // Same welcome email a password signup gets (RegisterController::store())
         // — this Google sign-in *is* the signup, so it deserves the same one.
-        Mail::to($user->email)->send(new WelcomeMail($user));
+        // Best-effort: the account is already created and about to be handed
+        // a token, so a mailer outage must not fail the sign-in.
+        $this->mailer->attempt($user->email, new WelcomeMail($user));
 
         return $user;
     }

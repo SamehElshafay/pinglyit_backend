@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Mail\PasswordResetMail;
 use App\Models\User;
+use App\Services\Mail\TransactionalMailer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -20,6 +20,8 @@ use Illuminate\Validation\ValidationException;
  */
 class PasswordResetController extends Controller
 {
+    public function __construct(private readonly TransactionalMailer $mailer) {}
+
     /**
      * Always returns the same message whether or not the email exists —
      * this endpoint never reveals account existence.
@@ -41,10 +43,12 @@ class PasswordResetController extends Controller
             $resetUrl = rtrim(config('pingly.frontend_url'), '/')
                 .'/reset-password?email='.urlencode($user->email).'&token='.$token;
 
-            // MAIL_MAILER=log until real SMTP creds exist — same
-            // fail-clean-when-unconfigured pattern as every other
-            // integration here: this never throws, it just logs the mail.
-            Mail::to($user->email)->send(new PasswordResetMail($resetUrl));
+            // Best-effort on purpose: a send that throws (Resend refuses
+            // any recipient until a sending domain is verified) must not
+            // change the response, or "does this email exist?" becomes
+            // answerable by whoever notices 200-vs-500. The failure goes
+            // to the log, which is where a broken mailer belongs.
+            $this->mailer->attempt($user->email, new PasswordResetMail($resetUrl));
         }
 
         return response()->json(['message' => 'If that email has an account, a reset link is on its way.']);

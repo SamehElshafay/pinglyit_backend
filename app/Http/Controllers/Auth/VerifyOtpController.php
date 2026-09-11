@@ -7,8 +7,8 @@ use App\Mail\WelcomeMail;
 use App\Models\User;
 use App\Services\Auth\JwtService;
 use App\Services\Auth\OtpService;
+use App\Services\Mail\TransactionalMailer;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
 class VerifyOtpController extends Controller
@@ -16,6 +16,7 @@ class VerifyOtpController extends Controller
     public function __construct(
         private readonly OtpService $otp,
         private readonly JwtService $jwt,
+        private readonly TransactionalMailer $mailer,
     ) {}
 
     /**
@@ -47,7 +48,9 @@ class VerifyOtpController extends Controller
         $user->update(['email_verified_at' => now()]);
         $user->load('company');
 
-        Mail::to($user->email)->send(new WelcomeMail($user));
+        // The code was correct and the account is verified — a welcome
+        // email that won't send is not a reason to withhold the token.
+        $this->mailer->attempt($user->email, new WelcomeMail($user));
 
         return response()->json([
             'token' => $this->jwt->issue($user, 'user')['token'],
@@ -60,6 +63,14 @@ class VerifyOtpController extends Controller
      * Always the same message regardless of whether the email matches an
      * account, or matches one that's already verified — same
      * account-existence privacy convention as PasswordResetController.
+     *
+     * One deliberate exception: a mail transport that refuses the send
+     * surfaces as a 502 (OtpService::issue() throws), which does reveal
+     * that this email had a code to resend. Taken knowingly — the
+     * alternative is telling someone a code is "on its way" when nothing
+     * was sent and their only route into the account is this endpoint,
+     * and a mailer refusing sends is an outage to fix, not a steady state
+     * worth designing the privacy guarantee around.
      */
     public function resend(Request $request)
     {

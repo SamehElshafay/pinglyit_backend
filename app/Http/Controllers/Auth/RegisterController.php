@@ -31,6 +31,12 @@ class RegisterController extends Controller
             'terms_accepted' => ['required', 'accepted'],
         ]);
 
+        // The OTP send is inside the transaction, not after it, because
+        // the code is the only way into a freshly created account: if it
+        // can't be sent, an account left behind here is unreachable
+        // forever — unverified, so it can't log in; already taken, so the
+        // same email can't sign up again. Rolling back gives the person a
+        // signup they can simply retry once mail works.
         DB::transaction(function () use ($data) {
             $company = Company::create([
                 'name' => $data['company_name'],
@@ -45,9 +51,9 @@ class RegisterController extends Controller
                 'password' => Hash::make($data['password']),
                 'terms_accepted_at' => now(),
             ]);
-        });
 
-        $this->otp->issue($data['email']);
+            $this->otp->issue($data['email']);
+        });
 
         return response()->json([
             'message' => 'Almost there — enter the verification code we just emailed you.',
