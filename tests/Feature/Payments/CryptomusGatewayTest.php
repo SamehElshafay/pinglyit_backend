@@ -56,7 +56,7 @@ class CryptomusGatewayTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('only supports USD');
 
-        app(CryptomusGateway::class)->createTopupSession($company, 25, 'EGP');
+        app(CryptomusGateway::class)->createTopupSession($company, 25, 'GBP');
     }
 
     /**

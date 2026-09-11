@@ -12,8 +12,8 @@ use Illuminate\Http\Request;
  * Cryptomus's Merchant ID and (Payment) API key are entered here, not
  * .env — admin-managed, encrypted at rest (platform_settings.value), same
  * pattern as every other connection screen. The Merchant ID isn't a
- * secret (an account identifier, like Paymob's Integration ID), so it's
- * returned in full; the API key is masked, same as PaymobConnectionController.
+ * secret (just an account identifier), so it's returned in full; the API
+ * key is masked, same as every other secret on these screens.
  */
 class CryptomusConnectionController extends Controller
 {

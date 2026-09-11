@@ -43,39 +43,22 @@ return [
     |--------------------------------------------------------------------------
     | Wallet top-up payment gateway
     |--------------------------------------------------------------------------
-    | 'stripe' | 'tap' | 'paymob' | 'cryptomus' | 'none' (disables top-ups —
-    | WalletController falls back to a 501). Originally Tap (Gulf-focused
-    | revenue), but Tap's own onboarding needs a bank account that doesn't
-    | exist yet; Paymob (Egyptian, accepted an individual account today) is
-    | what's actually reachable right now — see AppServiceProvider for the
-    | bind. Cryptomus (crypto/USDT) is the one option here that needs no
-    | bank account at all — see CryptomusGateway's docblock. This is a
-    | one-time deployment choice, not a secret, so it stays here rather than
-    | in the admin-managed PlatformSetting store (each gateway's own API keys
-    | still live there, encrypted — see AiConnectionController's docblock).
+    | 'stripe' | 'tap' | 'cryptomus' | 'none' (disables top-ups —
+    | WalletController falls back to a 501). Cryptomus is the active one:
+    | it settles in USD directly, so the wallet and the charge are the same
+    | number end to end, and it's the only option here that needs no bank
+    | account to onboard — see CryptomusGateway's docblock. Stripe and Tap
+    | both stay wired up but need a bank account that doesn't exist yet.
+    | This is a one-time deployment choice, not a secret, so it stays here
+    | rather than in the admin-managed PlatformSetting store (each gateway's
+    | own API keys still live there, encrypted — see AiConnectionController's
+    | docblock).
     */
-    'payment_gateway' => env('PAYMENT_GATEWAY', 'paymob'),
+    'payment_gateway' => env('PAYMENT_GATEWAY', 'cryptomus'),
 
     // Where to send the client back after a hosted checkout session (the
     // user_website dashboard, not the API's own URL).
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:5184'),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Paymob (docs: see PaymobGateway's own docblock)
-    |--------------------------------------------------------------------------
-    | Regional API base — the merchant account this was built against is
-    | Egypt-registered. Paymob also runs ksa.paymob.com / uae.paymob.com /
-    | oman.paymob.com for merchant accounts opened in those countries; change
-    | this if the account ever moves.
-    */
-    'paymob' => [
-        // env('X', 'default') only falls back when the key is fully absent —
-        // both .env and .env.example ship PAYMOB_API_BASE= blank (as a
-        // discoverable override point), which env() treats as "set to ''",
-        // not "use the default". `?:` catches that case too.
-        'api_base' => env('PAYMOB_API_BASE') ?: 'https://accept.paymob.com',
-    ],
 
     /*
     |--------------------------------------------------------------------------

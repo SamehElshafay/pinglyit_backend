@@ -8,9 +8,9 @@ use Illuminate\Http\Response;
 
 /**
  * Whatever gateway is active behind `config('pingly.payment_gateway')`
- * implements this — WalletController never talks to Stripe (or Paymob,
- * or Fawry, whenever one of those gets added) directly, so swapping or
- * adding a gateway later touches this contract's implementations only.
+ * implements this — WalletController never talks to Cryptomus (or Stripe,
+ * or whatever gets added next) directly, so swapping or adding a gateway
+ * later touches this contract's implementations only.
  */
 interface PaymentGateway
 {

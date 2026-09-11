@@ -35,46 +35,29 @@ return [
         ],
     ],
 
-    // Wallet top-ups — kept working in case a Stripe-eligible entity ever
-    // exists, but Stripe doesn't support Egypt-based payout accounts, so
-    // Tap (below) is the one that's actually reachable for this business.
+    // Wallet top-ups — kept wired up in case a Stripe-eligible entity ever
+    // exists, but its onboarding needs a bank account this business doesn't
+    // have yet, so Cryptomus (below) is the one actually reachable today.
     'stripe' => [
         'key' => env('STRIPE_KEY'),
         'secret' => env('STRIPE_SECRET'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
-    // Wallet top-ups (docs §4.7 — decided: Gulf-focused, most revenue from
-    // Saudi/UAE) — Tap covers cards + Mada across the GCC in one integration.
+    // Wallet top-ups — Tap covers cards + Mada across the GCC in one
+    // integration, parked for now because its onboarding needs a bank
+    // account that doesn't exist yet. Kept ready to switch back to.
     'tap' => [
         'secret_key' => env('TAP_SECRET_KEY'),
         'publishable_key' => env('TAP_PUBLISHABLE_KEY'),
     ],
 
-    // Wallet top-ups, no bank account needed at all — cards/EGP not
-    // required, just a KYC'd merchant account + domain confirmation.
-    // Switch PAYMENT_GATEWAY=cryptomus to use these instead.
+    // Wallet top-ups, the active gateway — no bank account needed at all,
+    // just a KYC'd merchant account + domain confirmation, and it settles
+    // in USD so no currency conversion happens anywhere in the app.
     'cryptomus' => [
         'merchant_id' => env('CRYPTOMUS_MERCHANT_ID'),
         'api_key' => env('CRYPTOMUS_API_KEY'), // the *Payment* API key, not Payout
-    ],
-
-    // Wallet top-ups, take two: Tap's onboarding needs a bank account we
-    // don't have yet, so Paymob (Egyptian, CBE-licensed, accepted an
-    // individual account with just a national ID + IBAN — no commercial
-    // register needed at this volume) is the one actually reachable today.
-    'paymob' => [
-        'secret_key' => env('PAYMOB_SECRET_KEY'),
-        'public_key' => env('PAYMOB_PUBLIC_KEY'),
-        'hmac_secret' => env('PAYMOB_HMAC_SECRET'),
-        // The numeric Integration ID for the "Online Card" method (dashboard →
-        // Developers → Payment Integrations) — account-specific, not a secret,
-        // but still admin-managed for the same reason the keys above are.
-        'integration_id' => env('PAYMOB_INTEGRATION_ID'),
-        // This account's Integration ID is fixed to EGP, but the wallet is
-        // USD — see PaymobGateway::usdToEgpRate()'s docblock for why the
-        // conversion happens only at this one boundary, admin-set here.
-        'usd_to_egp_rate' => env('PAYMOB_USD_TO_EGP_RATE'),
     ],
 
     // "Sign in with Google" for user_website (docs: GoogleAuthService).

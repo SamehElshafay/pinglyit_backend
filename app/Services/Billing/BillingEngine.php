@@ -108,13 +108,13 @@ class BillingEngine
     /**
      * Record a top-up as pending *before* the charge happens, with an
      * amount Pingly itself decided (not anything a gateway will later
-     * report). Exists for gateways whose webhook can't be fully trusted to
-     * echo back what was actually requested (see PaymobGateway::
-     * createTopupSession()'s docblock — its `extras` field, despite the
-     * docs, does not survive into the webhook at all, confirmed live
-     * 2026-08-28). `providerReference` must be something *we* generate and
-     * control (e.g. Paymob's `special_reference`), not the gateway's own
-     * transaction id, since that isn't known until the webhook fires.
+     * report). Exists because a gateway's webhook can't be fully trusted to
+     * echo back what was actually requested — a field the docs promise will
+     * round-trip may quietly not, so the credited amount is decided here
+     * once and never re-read from the callback. `providerReference` must be
+     * something *we* generate and control (e.g. CryptomusGateway's
+     * `order_id`), not the gateway's own transaction id, since that isn't
+     * known until the webhook fires.
      */
     public function recordPendingTopup(Company $company, float $amount, string $currency, string $provider, string $providerReference): WalletTopup
     {
@@ -129,15 +129,15 @@ class BillingEngine
     }
 
     /**
-     * Credit a real-money top-up (Stripe, Tap, Paymob — whatever gateway is
-     * active). Idempotent on `providerReference` — a webhook retry for the
-     * same reference will not double-credit the wallet.
+     * Credit a real-money top-up (Cryptomus, Stripe, Tap — whatever gateway
+     * is active). Idempotent on `providerReference` — a webhook retry for
+     * the same reference will not double-credit the wallet.
      *
      * The amount actually credited always comes from the WalletTopup row's
      * own stored `amount`, never the `$amount` parameter directly — for a
      * gateway that never pre-records one (Stripe/Tap: no existing row, so
      * firstOrCreate makes one right here from $amount/$currency), that's
-     * the same value either way. For one that does (Paymob: see
+     * the same value either way. For one that does (Cryptomus: see
      * recordPendingTopup()), the row's already-stored, Pingly-decided
      * amount wins over anything the gateway's webhook claims — the
      * $amount/$currency arguments are then just what the caller *thinks*

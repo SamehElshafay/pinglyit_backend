@@ -15,24 +15,21 @@ use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
- * Cryptomus (cryptomus.com) — accepts USDT and other crypto at a hosted
- * checkout page, no bank account or commercial register needed to sign up
- * (a KYC'd merchant account + domain confirmation is the only onboarding
- * step), which is what makes it worth having alongside Paymob: a route to
- * getting paid that doesn't depend on Egyptian banking rails at all.
+ * Cryptomus (cryptomus.com) — the active gateway. Accepts USDT and other
+ * crypto at a hosted checkout page, and needs no bank account or commercial
+ * register to sign up (a KYC'd merchant account + domain confirmation is
+ * the only onboarding step), which is what makes it reachable when Stripe's
+ * and Tap's onboarding aren't.
  *
- * Unlike Paymob, no manual currency conversion is needed here — Cryptomus
- * accepts the invoice in USD directly (`currency: 'USD'`) and converts to
- * whatever crypto the customer pays with on its own hosted page, so the
- * wallet (USD) and the charge are the same number throughout. The wallet
- * is still only ever credited from the webhook once Cryptomus confirms
- * `status: paid`/`paid_over`, never from the redirect back to the browser
- * alone, and the *amount* credited always comes from the pending
- * WalletTopup recorded here before the customer ever sees the checkout
- * page — same "never trust the webhook's own amount" rule as Paymob (see
- * PaymobGateway's docblock) applied on general principle, even though
- * Cryptomus's docs don't call out a reason to distrust it the way Paymob's
- * `extras` field turned out to need.
+ * No currency conversion happens anywhere: Cryptomus takes the invoice in
+ * USD directly (`currency: 'USD'`) and converts to whatever crypto the
+ * customer pays with on its own hosted page, so the wallet (USD) and the
+ * charge are the same number end to end. The wallet is only ever credited
+ * from the webhook once Cryptomus confirms `status: paid`/`paid_over`,
+ * never from the redirect back to the browser alone, and the *amount*
+ * credited always comes from the pending WalletTopup recorded here before
+ * the customer ever sees the checkout page — the webhook's own reported
+ * amount is never trusted, on general principle.
  *
  * Built from Cryptomus's public API docs (doc.cryptomus.com) — not
  * verified against a real live charge (no funded merchant account existed
@@ -89,14 +86,13 @@ class CryptomusGateway implements PaymentGateway
         if (strtoupper($currency) !== 'USD') {
             // Nothing in this app creates a non-USD wallet today — this is a
             // guard against silently mis-charging if that ever changes, not
-            // a real code path (same guard PaymobGateway has, for the same
-            // reason — see its docblock).
+            // a real code path.
             throw new RuntimeException("Cryptomus gateway only supports USD wallets today (got {$currency}).");
         }
 
         // Ours, not Cryptomus's — this is the order_id handleWebhook() looks
-        // the pending top-up back up by. Same shape as PaymobGateway's
-        // special_reference / TapGateway's reference.transaction.
+        // the pending top-up back up by. Same shape as TapGateway's
+        // reference.transaction.
         $reference = (string) $company->id.'-'.now()->timestamp;
 
         $body = [
@@ -139,8 +135,7 @@ class CryptomusGateway implements PaymentGateway
         // Recorded *before* the customer even sees the checkout page — the
         // amount the wallet gets credited is decided here, by Pingly, once,
         // and never touched again regardless of what the webhook later
-        // reports (same rule as PaymobGateway::createTopupSession(), see
-        // its docblock for why).
+        // reports (see the class docblock for why).
         $this->billing->recordPendingTopup($company, $amount, 'USD', 'cryptomus', $reference);
 
         return $url;
