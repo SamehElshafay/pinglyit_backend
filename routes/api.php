@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\AiPricingController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\GoogleConnectionController;
+use App\Http\Controllers\Admin\MailConnectionController;
 use App\Http\Controllers\Admin\OverviewController as AdminOverviewController;
 use App\Http\Controllers\Admin\PaymentConnectionController;
 use App\Http\Controllers\Admin\PaymobConnectionController;
@@ -20,12 +21,12 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\VerifyOtpController;
 use App\Http\Controllers\Client\ApiKeyController;
-use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
-use App\Http\Controllers\Client\ServiceController;
-use App\Http\Controllers\Client\WalletController;
 use App\Http\Controllers\Client\OfferController;
 use App\Http\Controllers\Client\OrderController;
+use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ProductController;
+use App\Http\Controllers\Client\ServiceController;
+use App\Http\Controllers\Client\WalletController;
 use App\Http\Controllers\Gateway\AiController as GatewayAiController;
 use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
 use App\Http\Controllers\Gateway\OfferController as GatewayOfferController;
@@ -193,6 +194,11 @@ Route::prefix('admin')->group(function () {
         Route::get('/google/connection', [GoogleConnectionController::class, 'show']);
         Route::put('/google/connection', [GoogleConnectionController::class, 'update']);
         Route::delete('/google/connection', [GoogleConnectionController::class, 'destroy']);
+
+        Route::get('/mail/connection', [MailConnectionController::class, 'show']);
+        Route::put('/mail/connection', [MailConnectionController::class, 'update']);
+        Route::delete('/mail/connection', [MailConnectionController::class, 'destroy']);
+        Route::post('/mail/connection/test', [MailConnectionController::class, 'test']);
 
         Route::get('/audit-log', [AuditLogController::class, 'index']);
     });

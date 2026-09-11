@@ -16,6 +16,10 @@ use Throwable;
  * own signup address, and that rejection arrives as an exception thrown
  * mid-request. Uncaught, it turned ordinary requests into 500s.
  *
+ * Also where the admin's choice of provider (MailProviderService — Resend
+ * vs. plain SMTP) actually gets applied: every send below points Laravel's
+ * mail config at whichever one is active first.
+ *
  * Two modes, because the emails here have opposite failure requirements:
  *
  *   deliver() — the email *is* the feature (an OTP code). Failing has to
@@ -29,11 +33,15 @@ use Throwable;
  */
 class TransactionalMailer
 {
+    public function __construct(private readonly MailProviderService $provider) {}
+
     /**
      * @throws MailDeliveryException when the mail can't be handed off
      */
     public function deliver(string $to, Mailable $mailable): void
     {
+        $this->provider->applyRuntimeConfig();
+
         try {
             Mail::to($to)->send($mailable);
         } catch (Throwable $e) {
@@ -49,6 +57,8 @@ class TransactionalMailer
      */
     public function attempt(string $to, Mailable $mailable): bool
     {
+        $this->provider->applyRuntimeConfig();
+
         try {
             Mail::to($to)->send($mailable);
 
