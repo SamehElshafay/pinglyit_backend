@@ -36,6 +36,35 @@ class CryptomusGatewayTest extends TestCase
         $this->assertTrue($gateway->isConfigured());
     }
 
+    /**
+     * APP_URL is hand-written per environment, and a trailing slash is an
+     * easy thing to leave on it — production had exactly that. Without
+     * rtrim the callback becomes "…com//api/webhooks/cryptomus", which the
+     * router doesn't match, so Cryptomus's confirmation never lands and a
+     * paid top-up silently never credits the wallet. Nothing surfaces that
+     * failure except a client who lost money, so it's pinned here.
+     */
+    public function test_callback_url_is_clean_even_if_app_url_has_a_trailing_slash(): void
+    {
+        $this->configure();
+        config(['app.url' => 'https://api.example.com/']);
+
+        Http::fake([
+            '*/payment' => Http::response(['state' => 0, 'result' => ['url' => 'https://pay.example.com/abc']], 200),
+        ]);
+
+        $company = Company::factory()->create();
+        $company->wallet()->create(['balance' => 0]);
+
+        app(CryptomusGateway::class)->createTopupSession($company, 25, 'USD');
+
+        Http::assertSent(function ($request) {
+            $body = json_decode($request->body(), true);
+
+            return $body['url_callback'] === 'https://api.example.com/api/webhooks/cryptomus';
+        });
+    }
+
     public function test_create_topup_session_fails_cleanly_when_not_configured(): void
     {
         $company = Company::factory()->create();

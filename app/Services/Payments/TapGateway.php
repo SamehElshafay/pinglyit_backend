@@ -67,8 +67,8 @@ class TapGateway implements PaymentGateway
                         'email' => $company->contact_email,
                     ],
                     'source' => ['id' => 'src_all'], // Tap's hosted page showing every available method (cards, Mada, wallets)
-                    'redirect' => ['url' => config('pingly.frontend_url').'/wallet?topup=success'],
-                    'post' => ['url' => config('app.url').'/api/webhooks/tap'],
+                    'redirect' => ['url' => rtrim(config('pingly.frontend_url'), '/').'/wallet?topup=success'],
+                    'post' => ['url' => rtrim(config('app.url'), '/').'/api/webhooks/tap'],
                     'reference' => ['transaction' => (string) $company->id.'-'.now()->timestamp],
                     'metadata' => ['company_id' => $company->id],
                     'description' => 'Pingly wallet top-up',

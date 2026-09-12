@@ -50,8 +50,8 @@ class StripeGateway implements PaymentGateway
                 ]],
                 'client_reference_id' => (string) $company->id,
                 'metadata' => ['company_id' => $company->id],
-                'success_url' => config('pingly.frontend_url').'/wallet?topup=success',
-                'cancel_url' => config('pingly.frontend_url').'/wallet?topup=cancelled',
+                'success_url' => rtrim(config('pingly.frontend_url'), '/').'/wallet?topup=success',
+                'cancel_url' => rtrim(config('pingly.frontend_url'), '/').'/wallet?topup=cancelled',
             ]);
         } catch (ApiConnectionException $e) {
             throw new \RuntimeException("Couldn't reach Stripe: {$e->getMessage()}");

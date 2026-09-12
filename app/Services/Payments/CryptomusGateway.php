@@ -99,7 +99,13 @@ class CryptomusGateway implements PaymentGateway
             'amount' => number_format($amount, 2, '.', ''),
             'currency' => 'USD',
             'order_id' => $reference,
-            'url_callback' => config('app.url').'/api/webhooks/cryptomus',
+            // rtrim, because APP_URL is written by hand per environment and
+            // a trailing slash there is an easy thing to leave in — without
+            // this it builds "…com//api/webhooks/cryptomus", and a callback
+            // that 404s means the payment succeeds and the wallet is never
+            // credited. Silent, and only ever discovered by a client losing
+            // money, so it's not worth depending on how APP_URL was typed.
+            'url_callback' => rtrim(config('app.url'), '/').'/api/webhooks/cryptomus',
             'url_return' => rtrim(config('pingly.frontend_url'), '/').'/wallet?topup=success',
             // Reject an underpayment rather than silently accept it as
             // "paid" — see the class docblock.
