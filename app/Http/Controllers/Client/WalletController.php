@@ -21,7 +21,7 @@ class WalletController extends Controller
             ->map(fn ($a) => ['time' => $a->created_at, 'type' => 'Adjustment', 'amount' => (float) $a->amount]);
 
         $topups = $company->walletTopups()->where('status', 'completed')->latest()->limit(25)->get()
-            ->map(fn ($t) => ['time' => $t->created_at, 'type' => 'Top-up (card)', 'amount' => (float) $t->amount]);
+            ->map(fn ($t) => ['time' => $t->created_at, 'type' => 'Top-up', 'amount' => (float) $t->amount]);
 
         $transactions = $debits->concat($credits)->concat($topups)
             ->sortByDesc('time')
@@ -36,10 +36,14 @@ class WalletController extends Controller
     }
 
     /**
-     * Card top-up, international — Stripe Checkout (docs §4.7, decided).
-     * Returns a URL; the frontend redirects the browser there. The wallet
-     * is only ever credited from the webhook once Stripe confirms payment
-     * (see StripeWebhookController), never from this response.
+     * Start a top-up on whichever gateway is active. Returns a URL; the
+     * frontend redirects the browser there. The wallet is only ever
+     * credited from that gateway's webhook once it confirms payment, never
+     * from this response.
+     *
+     * A gateway that isn't configured yet throws, and that surfaces as a
+     * 501 carrying its own reason — the frontend shows it verbatim, so
+     * "not configured" reaches the screen instead of a dead button.
      */
     public function topup(Request $request)
     {

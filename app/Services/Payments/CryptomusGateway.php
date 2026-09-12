@@ -104,7 +104,13 @@ class CryptomusGateway implements PaymentGateway
             // Reject an underpayment rather than silently accept it as
             // "paid" — see the class docblock.
             'is_payment_multiple' => false,
-            'lifetime' => 3600,
+            // Cryptomus's documented maximum (12h), not the 1h default.
+            // Paying by card goes through an on-ramp that runs its own
+            // identity check on the payer, which can easily outlast an
+            // hour — a window that expires mid-payment is a top-up the
+            // client has to start over. A crypto transfer is unaffected by
+            // the longer window; it just doesn't need it.
+            'lifetime' => 43200,
         ];
 
         // Signed and sent as the exact same bytes (via withBody, not
