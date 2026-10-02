@@ -211,7 +211,7 @@ class AiGatewayService
         $data = $response->json();
         $usage = $data['usage'] ?? ['prompt_tokens' => 0, 'completion_tokens' => 0, 'total_tokens' => 0];
         $realTokens = (int) ($usage['total_tokens'] ?? 0);
-        $realCost = $this->estimateRealCost($model, $usage);
+        $realCost = $this->estimateRealCost($model, $usage, $this->countImages($messages));
 
         $this->recordCompletion($company, $model, $realTokens, $realCost);
 
@@ -224,8 +224,11 @@ class AiGatewayService
      * for an hour so a chat request doesn't cost two HTTP round trips.
      *
      * @param  array{prompt_tokens?: int, completion_tokens?: int}  $usage
+     * @param  int  $imageCount  images in the prompt — some models carry a
+     *                           flat per-image price on top of their token
+     *                           rates, so leaving it out undercharges.
      */
-    private function estimateRealCost(string $model, array $usage): float
+    private function estimateRealCost(string $model, array $usage, int $imageCount = 0): float
     {
         // The completion above already happened — a failure here shouldn't
         // turn into a 500 after the client already got their answer. Worst
@@ -248,9 +251,32 @@ class AiGatewayService
 
         return round(
             (int) ($usage['prompt_tokens'] ?? 0) * (float) ($pricing['prompt'] ?? 0)
-            + (int) ($usage['completion_tokens'] ?? 0) * (float) ($pricing['completion'] ?? 0),
+            + (int) ($usage['completion_tokens'] ?? 0) * (float) ($pricing['completion'] ?? 0)
+            // Flat per-image charge, separate from token pricing and zero
+            // on models that don't have one. Without this term a vision
+            // request bills the client for its tokens only while Pingly
+            // still pays the image fee — a silent loss on every image,
+            // visible nowhere because the request itself succeeds.
+            + $imageCount * (float) ($pricing['image'] ?? 0),
             8,
         );
+    }
+
+    /**
+     * Images across every message, counted from what we're about to send
+     * rather than from the upstream's usage block — the usage block
+     * reports tokens, not how many images produced them.
+     *
+     * @param  array<int, array<string, mixed>>  $messages
+     */
+    private function countImages(array $messages): int
+    {
+        return collect($messages)
+            ->pluck('content')
+            ->filter(fn ($content) => is_array($content))
+            ->flatten(1)
+            ->filter(fn ($part) => is_array($part) && ($part['type'] ?? null) === 'image_url')
+            ->count();
     }
 
     /**

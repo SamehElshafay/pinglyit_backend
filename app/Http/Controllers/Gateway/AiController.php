@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Gateway;
 
 use App\Http\Controllers\Controller;
+use App\Rules\ChatMessageContent;
 use App\Services\Ai\AiGatewayService;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -30,7 +31,8 @@ class AiController extends Controller
             // 'tool' role + tool_call_id/tool_calls/name cover sending a tool's
             // result back in a follow-up call — see the class docblock.
             'messages.*.role' => ['required', 'string', 'in:system,user,assistant,tool'],
-            'messages.*.content' => ['nullable', 'string'],
+            // string | multimodal parts array — see ChatMessageContent.
+            'messages.*.content' => ['nullable', new ChatMessageContent],
             'messages.*.tool_calls' => ['sometimes', 'array'],
             'messages.*.tool_call_id' => ['sometimes', 'string'],
             'messages.*.name' => ['sometimes', 'string'],
