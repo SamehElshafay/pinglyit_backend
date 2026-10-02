@@ -16,3 +16,6 @@ php artisan serve --port 8000
 - `app/Services/WhatsApp/`, `app/Services/Ai/` — the two service modules (docs §3, §4).
 - `app/Services/Auth/JwtService.php` — token issuing/verification.
 - `routes/api.php` — client routes unprefixed, admin routes under `/admin`.
+
+Live on an AlmaLinux 9 / aaPanel box at `api.pingly.it.com`; deploy steps and
+SSH access (key-only on port 2495) are in the [root README](../README.md#deploying).
