@@ -8,17 +8,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class WhatsappAccount extends Model
 {
     protected $fillable = [
-        'company_id', 'waba_id', 'phone_number_id', 'registration_pin', 'phone_number', 'status', 'connected_at',
+        'company_id', 'waba_id', 'phone_number_id', 'registration_pin', 'access_token', 'phone_number', 'status', 'connected_at',
         'ai_autoreply_enabled', 'ai_autoreply_model', 'ai_autoreply_system_prompt', 'ai_commerce_enabled',
     ];
 
-    protected $hidden = ['registration_pin'];
+    protected $hidden = ['registration_pin', 'access_token'];
 
     protected function casts(): array
     {
         return [
             'connected_at' => 'datetime',
             'registration_pin' => 'encrypted',
+            'access_token' => 'encrypted',
             'ai_autoreply_enabled' => 'boolean',
             'ai_commerce_enabled' => 'boolean',
         ];

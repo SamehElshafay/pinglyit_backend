@@ -4,10 +4,12 @@ namespace App\Services\WhatsApp;
 
 use App\Enums\ServiceType;
 use App\Models\Company;
+use App\Models\WhatsappAccount;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -34,9 +36,101 @@ class WhatsAppGatewayService
         private readonly ServiceConfigRepository $configs,
     ) {}
 
+    /**
+     * True when the gateway can send for *someone* — either Pingly holds a
+     * platform-wide token, or at least one client has connected their own
+     * WhatsApp Business Account. Per-company readiness is a different
+     * question, answered by isReadyFor().
+     */
     public function isConfigured(): bool
     {
-        return filled(config('pingly.whatsapp.access_token'));
+        return filled(config('pingly.whatsapp.access_token'))
+            || WhatsappAccount::whereNotNull('access_token')->exists();
+    }
+
+    /** This company specifically has a number that can send right now. */
+    public function isReadyFor(Company $company): bool
+    {
+        return $this->connectedAccountFor($company) !== null;
+    }
+
+    public function connectedAccountFor(Company $company): ?WhatsappAccount
+    {
+        return $company->whatsappAccounts()
+            ->where('status', 'connected')
+            ->whereNotNull('phone_number_id')
+            ->first();
+    }
+
+    /**
+     * The client's own Meta token when they've connected their own WhatsApp
+     * Business Account, falling back to Pingly's platform token for numbers
+     * connected under Pingly's account before per-client tokens existed.
+     *
+     * The client's own token is what makes this product possible at all:
+     * an unverified business is capped by Meta at two phone numbers across
+     * all its WABAs, so hosting every client under one account stops being
+     * a product at the second customer.
+     */
+    private function tokenFor(WhatsappAccount $account): ?string
+    {
+        return $account->access_token ?: config('pingly.whatsapp.access_token');
+    }
+
+    /**
+     * Ask Meta whether this phone number id + token pair actually works,
+     * before anything is stored.
+     *
+     * Worth the round trip because the most common mistake here is pasting
+     * the temporary token Meta shows on its own test screen, which expires
+     * in 24 hours. Saved blind, that looks like a successful setup today and
+     * fails silently tomorrow on a real customer's message — with nothing to
+     * point at. Checking now turns that into a sentence on the setup screen.
+     *
+     * @return array{ok: bool, message: string, phone_number: ?string}
+     */
+    public function verifyCredentials(string $phoneNumberId, string $token): array
+    {
+        $apiVersion = config('pingly.whatsapp.api_version');
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->get("https://graph.facebook.com/{$apiVersion}/{$phoneNumberId}", [
+                    'fields' => 'display_phone_number,verified_name',
+                ]);
+        } catch (ConnectionException $e) {
+            Log::warning('WhatsApp credential check could not reach Meta.', ['reason' => $e->getMessage()]);
+
+            return ['ok' => false, 'message' => "Couldn't reach WhatsApp to check these details — try again in a moment.", 'phone_number' => null];
+        }
+
+        if ($response->successful()) {
+            return [
+                'ok' => true,
+                'message' => 'Connected.',
+                'phone_number' => $response->json('display_phone_number'),
+            ];
+        }
+
+        // Meta's own error body names the vendor and can carry account
+        // detail, so it goes to the log. What comes back is the thing the
+        // client can actually act on.
+        Log::warning('WhatsApp credential check rejected by Meta.', [
+            'phone_number_id' => $phoneNumberId,
+            'status' => $response->status(),
+            'body' => $response->body(),
+        ]);
+
+        $code = (int) $response->json('error.code');
+
+        $message = match (true) {
+            $code === 190 => 'That access token is expired or invalid. Make sure you created a permanent System User token, not the temporary one shown on the test screen.',
+            $response->status() === 404 => "That Phone number ID doesn't exist, or this token can't see it. Check you copied the Phone number ID and not the WhatsApp Business Account ID.",
+            default => 'WhatsApp rejected these details. Check the Phone number ID and token, then try again.',
+        };
+
+        return ['ok' => false, 'message' => $message, 'phone_number' => null];
     }
 
     public function isEnabledFor(Company $company): bool
@@ -104,18 +198,19 @@ class WhatsAppGatewayService
             throw new RuntimeException('Wallet balance is too low to send this message.');
         }
 
-        if (! $this->isConfigured()) {
-            throw new RuntimeException('WhatsApp Gateway is not configured — set META_WHATSAPP_* in .env.');
+        $account = $this->connectedAccountFor($company);
+        if (! $account) {
+            throw new RuntimeException('No WhatsApp number is connected to this account yet.');
         }
 
-        $account = $company->whatsappAccounts()->where('status', 'connected')->whereNotNull('phone_number_id')->first();
-        if (! $account) {
-            throw new RuntimeException('This company has no connected WhatsApp number.');
+        $token = $this->tokenFor($account);
+        if (blank($token)) {
+            throw new RuntimeException('This WhatsApp number has no access token — reconnect it from the dashboard.');
         }
 
         $apiVersion = config('pingly.whatsapp.api_version');
         try {
-            $response = Http::withToken(config('pingly.whatsapp.access_token'))
+            $response = Http::withToken($token)
                 ->timeout(30)
                 ->post("https://graph.facebook.com/{$apiVersion}/{$account->phone_number_id}/messages", array_merge([
                     'messaging_product' => 'whatsapp',
@@ -126,7 +221,16 @@ class WhatsAppGatewayService
         }
 
         if ($response->failed()) {
-            throw new RuntimeException('Meta Cloud API error: '.$response->body());
+            // Meta's body names the vendor and can carry account detail the
+            // client shouldn't see — same rule as the AI Gateway's upstream
+            // errors. The real reason goes to the log, not the response.
+            Log::error('WhatsApp upstream send failed.', [
+                'company_id' => $company->id,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            throw new RuntimeException('The message could not be sent — check the number is still connected, then try again.');
         }
 
         $this->recordDeliveredMessage($company, $category, $country, $this->baseCostFor($company, $category, $country));

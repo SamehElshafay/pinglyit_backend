@@ -34,6 +34,68 @@ class ServiceController extends Controller
         ]);
     }
 
+    /**
+     * Connect a WhatsApp number the client owns, using their own Meta
+     * credentials rather than Pingly's.
+     *
+     * This is the whole shape of the integration: Pingly holds no Meta
+     * Business Verification, and an unverified business is capped by Meta
+     * at two phone numbers across all its WABAs — so hosting every client
+     * under one Pingly account stops being a product at the second
+     * customer. Each client connecting their own WhatsApp Business Account
+     * removes that ceiling, and keeps Pingly out of the liability path for
+     * whatever any client chooses to send.
+     *
+     * The token is stored encrypted (see WhatsappAccount's casts) and never
+     * returned to the browser again — the same rule as every other secret
+     * on the platform.
+     */
+    public function connectWhatsappCredentials(Request $request)
+    {
+        $data = $request->validate([
+            'phone_number_id' => ['required', 'string', 'max:64'],
+            'waba_id' => ['required', 'string', 'max:64'],
+            'access_token' => ['required', 'string', 'min:20'],
+            'phone_number' => ['sometimes', 'nullable', 'string', 'max:32'],
+        ]);
+
+        $company = $request->user()->company;
+
+        // Verify the credentials actually work before saving them. A client
+        // who pastes a 24-hour token (Meta's default on the test screen, and
+        // the single most common mistake here) finds out now, rather than on
+        // their first real customer message tomorrow.
+        $check = $this->whatsapp->verifyCredentials($data['phone_number_id'], $data['access_token']);
+
+        if (! $check['ok']) {
+            return response()->json(['message' => $check['message']], 422);
+        }
+
+        $account = $company->whatsappAccounts()->updateOrCreate(
+            ['phone_number_id' => $data['phone_number_id']],
+            [
+                'waba_id' => $data['waba_id'],
+                'access_token' => $data['access_token'],
+                'phone_number' => $data['phone_number'] ?? $check['phone_number'],
+                'status' => 'connected',
+                'connected_at' => now(),
+            ],
+        );
+
+        return response()->json([
+            'connected' => true,
+            'account' => $account->only('id', 'waba_id', 'phone_number_id', 'phone_number', 'status', 'connected_at'),
+        ]);
+    }
+
+    public function disconnectWhatsappCredentials(Request $request)
+    {
+        $company = $request->user()->company;
+        $company->whatsappAccounts()->delete();
+
+        return response()->json(['connected' => false]);
+    }
+
     public function whatsapp(Request $request)
     {
         $company = $request->user()->company;

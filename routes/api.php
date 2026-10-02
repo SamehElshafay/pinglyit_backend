@@ -119,6 +119,8 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
     Route::get('/services/whatsapp/embedded-signup/config', [ServiceController::class, 'whatsappEmbeddedSignupConfig']);
     Route::post('/services/whatsapp/embedded-signup', [ServiceController::class, 'connectWhatsapp']);
+    Route::put('/services/whatsapp/credentials', [ServiceController::class, 'connectWhatsappCredentials']);
+    Route::delete('/services/whatsapp/credentials', [ServiceController::class, 'disconnectWhatsappCredentials']);
     Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);
     Route::put('/services/whatsapp/autoreply', [ServiceController::class, 'updateWhatsappAutoReply']);
     Route::put('/services/whatsapp/commerce', [ServiceController::class, 'updateWhatsappCommerce']);
