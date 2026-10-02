@@ -110,7 +110,7 @@ class AiCommerceAgentService
             $this->whatsapp->send($company, $from, 'service', 'EG', [
                 'type' => 'text',
                 'text' => ['body' => $reply],
-            ]);
+            ], 'ai_commerce');
 
             // Only the plain user/assistant turns go into stored history —
             // not the tool-call/tool-result plumbing, which would bloat

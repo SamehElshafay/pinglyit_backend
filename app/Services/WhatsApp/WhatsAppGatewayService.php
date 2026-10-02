@@ -5,6 +5,7 @@ namespace App\Services\WhatsApp;
 use App\Enums\ServiceType;
 use App\Models\Company;
 use App\Models\WhatsappAccount;
+use App\Models\WhatsappMessage;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
 use Illuminate\Http\Client\ConnectionException;
@@ -190,7 +191,7 @@ class WhatsAppGatewayService
      *
      * @param  array<string, mixed>  $payload  the message body — merged into the Cloud API request as-is (e.g. `['type' => 'text', 'text' => ['body' => '...']]`)
      */
-    public function send(Company $company, string $to, string $category, string $country, array $payload): array
+    public function send(Company $company, string $to, string $category, string $country, array $payload, string $sentBy = 'api'): array
     {
         $estimatedBilled = $this->estimateCost($company, $category, $country);
 
@@ -230,10 +231,34 @@ class WhatsAppGatewayService
                 'body' => $response->body(),
             ]);
 
+            WhatsappMessage::record([
+                'company_id' => $company->id,
+                'customer_phone' => $to,
+                'direction' => WhatsappMessage::DIRECTION_OUT,
+                'type' => $payload['type'] ?? 'text',
+                'body' => $payload['text']['body'] ?? null,
+                'status' => 'failed',
+                // Meta's own wording, kept out of the client-facing message
+                // above but worth having on the row someone is debugging.
+                'error' => $response->json('error.message') ?? 'Upstream rejected the message.',
+                'sent_by' => $sentBy,
+            ]);
+
             throw new RuntimeException('The message could not be sent — check the number is still connected, then try again.');
         }
 
         $this->recordDeliveredMessage($company, $category, $country, $this->baseCostFor($company, $category, $country));
+
+        WhatsappMessage::record([
+            'company_id' => $company->id,
+            'customer_phone' => $to,
+            'direction' => WhatsappMessage::DIRECTION_OUT,
+            'type' => $payload['type'] ?? 'text',
+            'body' => $payload['text']['body'] ?? null,
+            'wa_message_id' => $response->json('messages.0.id'),
+            'status' => 'sent',
+            'sent_by' => $sentBy,
+        ]);
 
         return $response->json();
     }

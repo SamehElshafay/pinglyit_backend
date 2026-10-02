@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Models\UsageEvent;
 use App\Models\WhatsappAccount;
+use App\Models\WhatsappMessage;
 use App\Services\WhatsApp\AiCommerceAgentService;
 use App\Services\WhatsApp\WhatsappAutoReplyService;
 use Illuminate\Http\Request;
@@ -66,12 +67,28 @@ class WhatsappWebhookController extends Controller
                             'metadata' => ['category' => 'inbound', 'country' => null, 'from' => $message['from'] ?? null],
                         ]);
 
+                        $text = $message['text']['body'] ?? null;
+
+                        // Logged before the AI runs, so an inbound message is
+                        // on the record even if replying to it fails.
+                        // Non-text types are recorded by their type with no
+                        // body rather than dropped — the thread should show
+                        // that a customer sent *something*, not a silent gap.
+                        WhatsappMessage::record([
+                            'company_id' => $account->company_id,
+                            'customer_phone' => $message['from'] ?? 'unknown',
+                            'direction' => WhatsappMessage::DIRECTION_IN,
+                            'type' => $message['type'] ?? 'text',
+                            'body' => $text,
+                            'wa_message_id' => $message['id'] ?? null,
+                            'status' => 'received',
+                        ]);
+
                         // Both AI modes only ever fire for plain text messages
                         // today. Commerce and plain auto-reply are mutually
                         // exclusive per number — see the ai_commerce_enabled
                         // migration's docblock for why commerce wins if both
                         // are somehow on.
-                        $text = $message['text']['body'] ?? null;
                         if (($message['type'] ?? null) === 'text' && filled($text) && filled($message['from'] ?? null)) {
                             if ($account->ai_commerce_enabled) {
                                 $this->commerceAgent->handleInboundMessage($account, $message['from'], $text);
@@ -85,7 +102,19 @@ class WhatsappWebhookController extends Controller
                 }
 
                 foreach ($value['statuses'] ?? [] as $status) {
-                    Log::info('WhatsApp delivery status', ['status' => $status['status'] ?? null, 'message_id' => $status['id'] ?? null]);
+                    // Meta reports sent -> delivered -> read as separate
+                    // callbacks. Carrying them onto the stored row is what
+                    // lets the inbox show a message actually arrived, rather
+                    // than only that we handed it over.
+                    $id = $status['id'] ?? null;
+                    $state = $status['status'] ?? null;
+
+                    if ($id && $state) {
+                        WhatsappMessage::where('wa_message_id', $id)->update([
+                            'status' => $state,
+                            'error' => $status['errors'][0]['title'] ?? null,
+                        ]);
+                    }
                 }
             }
         }

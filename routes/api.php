@@ -21,18 +21,21 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\VerifyOtpController;
 use App\Http\Controllers\Client\ApiKeyController;
+use App\Http\Controllers\Client\CatalogSourceController;
 use App\Http\Controllers\Client\OfferController;
 use App\Http\Controllers\Client\OrderController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ProductController;
 use App\Http\Controllers\Client\ServiceController;
 use App\Http\Controllers\Client\WalletController;
+use App\Http\Controllers\Client\WhatsappInboxController;
 use App\Http\Controllers\Gateway\AiController as GatewayAiController;
 use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
 use App\Http\Controllers\Gateway\OfferController as GatewayOfferController;
 use App\Http\Controllers\Gateway\OrderController as GatewayOrderController;
 use App\Http\Controllers\Gateway\ProductController as GatewayProductController;
 use App\Http\Controllers\Gateway\WhatsAppController as GatewayWhatsAppController;
+use App\Http\Controllers\Gateway\WhatsAppInboxController as GatewayWhatsAppInboxController;
 use App\Http\Controllers\Webhooks\CryptomusWebhookController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
 use App\Http\Controllers\Webhooks\TapWebhookController;
@@ -52,6 +55,8 @@ Route::prefix('v1')->middleware(['api-key', 'throttle:60,1'])->group(function ()
     Route::get('/models', [GatewayAiController::class, 'models']);
     Route::post('/ai/chat', [GatewayAiController::class, 'chat']);
     Route::post('/whatsapp/send', [GatewayWhatsAppController::class, 'send']);
+    Route::get('/whatsapp/conversations', [GatewayWhatsAppInboxController::class, 'conversations']);
+    Route::get('/whatsapp/messages', [GatewayWhatsAppInboxController::class, 'messages']);
 
     // The AI Commerce Assistant's catalog + order tracking (see
     // AiCommerceAgentService) — "من خلال الـ APIs او من الداشبورد" was the
@@ -119,6 +124,17 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/whatsapp', [ServiceController::class, 'whatsapp']);
     Route::get('/services/whatsapp/embedded-signup/config', [ServiceController::class, 'whatsappEmbeddedSignupConfig']);
     Route::post('/services/whatsapp/embedded-signup', [ServiceController::class, 'connectWhatsapp']);
+    // Inbox — the message log a person reads, and replies from.
+    Route::get('/whatsapp/conversations', [WhatsappInboxController::class, 'conversations']);
+    Route::get('/whatsapp/messages', [WhatsappInboxController::class, 'messages']);
+    Route::post('/whatsapp/messages', [WhatsappInboxController::class, 'send']);
+
+    // Catalog pulled from the company's own product API.
+    Route::get('/catalog-source', [CatalogSourceController::class, 'show']);
+    Route::put('/catalog-source', [CatalogSourceController::class, 'update']);
+    Route::post('/catalog-source/sync', [CatalogSourceController::class, 'sync']);
+    Route::delete('/catalog-source', [CatalogSourceController::class, 'destroy']);
+
     Route::put('/services/whatsapp/credentials', [ServiceController::class, 'connectWhatsappCredentials']);
     Route::delete('/services/whatsapp/credentials', [ServiceController::class, 'disconnectWhatsappCredentials']);
     Route::post('/services/whatsapp/send', [ServiceController::class, 'sendWhatsapp']);

@@ -69,7 +69,7 @@ class WhatsappAutoReplyService
             $this->whatsapp->send($company, $from, 'service', 'EG', [
                 'type' => 'text',
                 'text' => ['body' => $reply],
-            ]);
+            ], 'ai_autoreply');
         } catch (Throwable $e) {
             Log::warning('WhatsApp AI auto-reply failed', [
                 'company_id' => $company->id,

@@ -48,6 +48,11 @@ class Company extends Model
         return $this->hasMany(WhatsappAccount::class);
     }
 
+    public function catalogSource(): HasOne
+    {
+        return $this->hasOne(CatalogSource::class);
+    }
+
     public function apiKeys(): HasMany
     {
         return $this->hasMany(ApiKey::class);
