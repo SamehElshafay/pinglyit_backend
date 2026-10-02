@@ -31,6 +31,14 @@ class ChatMessageContent implements ValidationRule
      */
     public const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+    /**
+     * Larger than an image because a real document legitimately is, but
+     * still well inside the server's 50MB body limit once base64 has added
+     * its third — and inside PHP's 128MB memory limit, which decoding a
+     * body this size into PHP structures eats several times over.
+     */
+    public const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
     private const MAX_PARTS = 20;
 
     public function validate(string $attribute, mixed $value, Closure $fail): void
@@ -69,8 +77,8 @@ class ChatMessageContent implements ValidationRule
 
         $type = $part['type'] ?? null;
 
-        if (! in_array($type, ['text', 'image_url'], true)) {
-            $fail("The {$at}.type must be either \"text\" or \"image_url\".");
+        if (! in_array($type, ['text', 'image_url', 'file'], true)) {
+            $fail("The {$at}.type must be one of \"text\", \"image_url\" or \"file\".");
 
             return;
         }
@@ -79,6 +87,12 @@ class ChatMessageContent implements ValidationRule
             if (! isset($part['text']) || ! is_string($part['text'])) {
                 $fail("The {$at}.text is required and must be a string.");
             }
+
+            return;
+        }
+
+        if ($type === 'file') {
+            $this->validateFilePart($at, $part, $fail);
 
             return;
         }
@@ -92,6 +106,44 @@ class ChatMessageContent implements ValidationRule
         }
 
         $this->validateImageUrl($at, $url, $fail);
+    }
+
+    /**
+     * A PDF, in OpenRouter's file shape. Only PDFs: every other document
+     * format would silently fall through to a paid parsing engine upstream
+     * instead of being read by the model directly, which is both worse
+     * output and a cost that never reaches the client's bill.
+     */
+    private function validateFilePart(string $at, array $part, Closure $fail): void
+    {
+        $filename = $part['file']['filename'] ?? null;
+        $data = $part['file']['file_data'] ?? null;
+
+        if (! is_string($filename) || $filename === '') {
+            $fail("The {$at}.file.filename is required and must be a string.");
+
+            return;
+        }
+
+        if (! is_string($data) || $data === '') {
+            $fail("The {$at}.file.file_data is required and must be a string.");
+
+            return;
+        }
+
+        if (str_starts_with($data, 'https://')) {
+            return;
+        }
+
+        if (! preg_match('#^data:application/pdf;base64,#i', $data)) {
+            $fail("The {$at}.file.file_data must be an https:// URL or a base64 data: URI for a PDF.");
+
+            return;
+        }
+
+        if ($this->decodedSize($data) > self::MAX_PDF_BYTES) {
+            $fail("The {$at} PDF is larger than ".(self::MAX_PDF_BYTES / 1024 / 1024).'MB. Split it, or pass an https:// URL instead.');
+        }
     }
 
     /**
@@ -111,13 +163,28 @@ class ChatMessageContent implements ValidationRule
             return;
         }
 
-        // strlen on the base64 payload over-estimates the decoded size by
-        // about a third, which is the safe direction to be wrong in: it
-        // never lets something through that the real limit would reject.
-        $payload = substr($url, strpos($url, ',') + 1);
-
-        if (strlen($payload) * 3 / 4 > self::MAX_IMAGE_BYTES) {
+        if ($this->decodedSize($url) > self::MAX_IMAGE_BYTES) {
             $fail("The {$at} image is larger than ".(self::MAX_IMAGE_BYTES / 1024 / 1024).'MB. Resize it, or pass an https:// URL instead.');
         }
+    }
+
+    /**
+     * Decoded byte count of a data: URI's base64 payload, measured without
+     * copying it — substr() on a 16MB string allocates another 16MB, so
+     * checking "is this too big" was itself capable of exhausting memory on
+     * exactly the oversized input the check exists to reject.
+     *
+     * Base64 carries 3 bytes per 4 characters; padding makes this
+     * over-estimate by at most two bytes, which is the safe direction.
+     */
+    private function decodedSize(string $dataUri): int
+    {
+        $comma = strpos($dataUri, ',');
+
+        if ($comma === false) {
+            return 0;
+        }
+
+        return (int) ((strlen($dataUri) - $comma - 1) * 3 / 4);
     }
 }

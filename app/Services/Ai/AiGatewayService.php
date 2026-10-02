@@ -187,6 +187,9 @@ class AiGatewayService
             // completion that long, even for a two-line reply. Capped here
             // so a normal request works on a normal balance.
             'max_tokens' => $options['max_tokens'] ?? 4096,
+            // Only present when the prompt actually carries a PDF — see
+            // pdfPlugin() for why it is pinned rather than left to default.
+            'plugins' => $this->pdfPlugin($messages),
         ], fn ($v) => $v !== null);
 
         try {
@@ -260,6 +263,37 @@ class AiGatewayService
             + $imageCount * (float) ($pricing['image'] ?? 0),
             8,
         );
+    }
+
+    /**
+     * Pin PDF handling to the model's own native file reading, and only
+     * when a PDF is actually present.
+     *
+     * Left unset, OpenRouter falls back to an OCR engine billed per page
+     * ($2/1000) for any model that can't read a file natively. That charge
+     * lands on Pingly's account and appears nowhere in the response's usage
+     * block, so it would never reach the client's bill — a silent loss of
+     * real money on every document, growing with its page count. 'native'
+     * is charged as ordinary input tokens instead, which estimateRealCost()
+     * already prices correctly, and it gives the model the actual pages
+     * (layout, colour, tables, handwriting) rather than extracted text.
+     *
+     * The trade: a model without native file support will refuse the
+     * request. That's deliberate — a clean refusal is better than a quiet
+     * fallback to a charge nobody sees.
+     *
+     * @param  array<int, array<string, mixed>>  $messages
+     * @return array<int, array<string, mixed>>|null
+     */
+    private function pdfPlugin(array $messages): ?array
+    {
+        $hasPdf = collect($messages)
+            ->pluck('content')
+            ->filter(fn ($content) => is_array($content))
+            ->flatten(1)
+            ->contains(fn ($part) => is_array($part) && ($part['type'] ?? null) === 'file');
+
+        return $hasPdf ? [['id' => 'file-parser', 'pdf' => ['engine' => 'native']]] : null;
     }
 
     /**
