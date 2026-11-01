@@ -23,7 +23,10 @@ use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\VerifyOtpController;
 use App\Http\Controllers\Client\ApiKeyController;
+use App\Http\Controllers\Client\AssistantController;
 use App\Http\Controllers\Client\CatalogSourceController;
+use App\Http\Controllers\Client\ImageStudioController;
+use App\Http\Controllers\Client\MetaCampaignController;
 use App\Http\Controllers\Client\MetaController;
 use App\Http\Controllers\Client\OfferController;
 use App\Http\Controllers\Client\OrderController;
@@ -123,6 +126,8 @@ Route::get('/video-media/{project}/{kind}/{index?}', [VideoStudioController::cla
     ->whereNumber('index')
     ->name('video.media');
 
+Route::get('/image-media/{image}', [ImageStudioController::class, 'media'])->middleware('signed')->name('image.media');
+
 Route::middleware(['jwt', 'client'])->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy']);
     Route::get('/me', [LoginController::class, 'me']);
@@ -165,6 +170,20 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::delete('/meta', [MetaController::class, 'destroy']);
     Route::get('/meta/campaigns', [MetaController::class, 'campaigns']);
     Route::post('/meta/analyse', [MetaController::class, 'analyse'])->middleware('throttle:10,1');
+    Route::get('/meta/campaigns/builder', [MetaCampaignController::class, 'index']);
+    Route::post('/meta/campaigns/builder', [MetaCampaignController::class, 'store'])->middleware('throttle:10,1');
+    Route::put('/meta/campaigns/builder/{campaign}', [MetaCampaignController::class, 'update'])->whereNumber('campaign');
+    Route::post('/meta/campaigns/builder/{campaign}/launch', [MetaCampaignController::class, 'launch'])->whereNumber('campaign')->middleware('throttle:10,1');
+    Route::post('/meta/campaigns/builder/{campaign}/status', [MetaCampaignController::class, 'status'])->whereNumber('campaign')->middleware('throttle:20,1');
+    Route::delete('/meta/campaigns/builder/{campaign}', [MetaCampaignController::class, 'destroy'])->whereNumber('campaign');
+
+    Route::get('/services/images', [ImageStudioController::class, 'index']);
+    Route::post('/services/images', [ImageStudioController::class, 'store'])->middleware('throttle:20,1');
+    Route::delete('/services/images/{image}', [ImageStudioController::class, 'destroy'])->whereNumber('image');
+    Route::post('/services/images/{image}/caption', [ImageStudioController::class, 'caption'])->whereNumber('image')->middleware('throttle:20,1');
+    Route::post('/services/images/{image}/publish', [ImageStudioController::class, 'publish'])->whereNumber('image')->middleware('throttle:10,1');
+
+    Route::post('/assistant', [AssistantController::class, 'chat'])->middleware('throttle:30,1');
 
     Route::get('/services/video', [VideoStudioController::class, 'index']);
     Route::post('/services/video/projects', [VideoStudioController::class, 'store'])->middleware('throttle:10,1');

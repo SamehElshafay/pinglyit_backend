@@ -31,6 +31,8 @@ class ServiceController extends Controller
             ['key' => 'whatsapp', 'name' => 'WhatsApp AI Sales', 'enabled' => (bool) $this->whatsapp->connectedAccountFor($company)],
             ['key' => 'ai', 'name' => ServiceType::Ai->label(), 'enabled' => $this->ai->isEnabledFor($company)],
             ['key' => 'video', 'name' => ServiceType::Video->label(), 'enabled' => app(VideoStudioService::class)->isEnabledFor($company)],
+            ['key' => 'images', 'name' => 'Image Studio', 'enabled' => true],
+            ['key' => 'meta', 'name' => 'Meta Ads & publishing', 'enabled' => (bool) $company->metaConnection],
         ]);
     }
 

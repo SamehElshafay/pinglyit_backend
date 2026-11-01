@@ -52,6 +52,9 @@ return [
         'advisor_model' => env('META_ADVISOR_MODEL', 'google/gemini-2.5-pro'),
     ],
 
+    // The in-dashboard "Ask Pingly" helper (billed as AI Gateway usage).
+    'assistant_model' => env('ASSISTANT_MODEL', 'google/gemini-2.5-flash'),
+
     /*
     |--------------------------------------------------------------------------
     | Video Studio — prompt → storyboard → rendered shots → one film

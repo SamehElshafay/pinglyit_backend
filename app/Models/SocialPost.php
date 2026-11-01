@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class SocialPost extends Model
 {
     protected $fillable = [
-        'company_id', 'video_project_id', 'platform', 'caption', 'status', 'container_id',
+        'company_id', 'video_project_id', 'ai_image_id', 'platform', 'caption', 'status', 'container_id',
         'external_id', 'permalink', 'error', 'attempts', 'published_at',
     ];
 
@@ -20,6 +20,11 @@ class SocialPost extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function aiImage(): BelongsTo
+    {
+        return $this->belongsTo(AiImage::class);
     }
 
     public function videoProject(): BelongsTo

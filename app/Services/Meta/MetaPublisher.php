@@ -2,6 +2,7 @@
 
 namespace App\Services\Meta;
 
+use App\Models\AiImage;
 use App\Models\Company;
 use App\Models\MetaConnection;
 use App\Models\SocialPost;
@@ -86,35 +87,67 @@ class MetaPublisher
      */
     public function publish(VideoProject $project, array $platforms, string $caption): array
     {
-        $conn = $project->company->metaConnection;
-        $targets = $this->targets($conn);
-
         if ($project->status !== 'completed' || ! $project->output_path) {
             throw new RuntimeException('Only a finished video can be published.');
         }
+
+        // Long enough for Meta to fetch it even when its queue is slow.
+        return $this->publishMedia($project->company, [
+            'kind' => 'video',
+            'url' => URL::temporarySignedRoute('video.media', now()->addHours(12), ['project' => $project->id, 'kind' => 'film']),
+            'title' => $project->title,
+            'owner' => ['video_project_id' => $project->id],
+        ], $platforms, $caption);
+    }
+
+    /**
+     * @param  array<int, string>  $platforms
+     * @return array<int, SocialPost>
+     */
+    public function publishImage(AiImage $image, array $platforms, string $caption): array
+    {
+        return $this->publishMedia($image->company, [
+            'kind' => 'image',
+            'url' => URL::temporarySignedRoute('image.media', now()->addHours(12), ['image' => $image->id]),
+            'title' => null,
+            'owner' => ['ai_image_id' => $image->id],
+        ], $platforms, $caption);
+    }
+
+    /**
+     * @param  array{kind: string, url: string, title: ?string, owner: array<string, int>}  $media
+     * @param  array<int, string>  $platforms
+     * @return array<int, SocialPost>
+     */
+    private function publishMedia(Company $company, array $media, array $platforms, string $caption): array
+    {
+        $conn = $company->metaConnection;
+        $targets = $this->targets($conn);
+
         foreach ($platforms as $platform) {
             if (! ($targets[$platform]['available'] ?? false)) {
                 throw new RuntimeException($targets[$platform]['reason'] ?? 'Not available.');
             }
         }
 
-        // Long enough for Meta to fetch it even when its queue is slow.
-        $videoUrl = URL::temporarySignedRoute('video.media', now()->addHours(12), ['project' => $project->id, 'kind' => 'film']);
         $posts = [];
-
         foreach ($platforms as $platform) {
             $post = SocialPost::create([
-                'company_id' => $project->company_id,
-                'video_project_id' => $project->id,
+                'company_id' => $company->id,
+                ...$media['owner'],
                 'platform' => $platform,
                 'caption' => $caption,
                 'status' => 'processing',
             ]);
 
             try {
-                $platform === 'facebook'
-                    ? $this->publishToFacebook($conn, $post, $videoUrl, $project->title)
-                    : $this->startInstagram($conn, $post, $videoUrl);
+                if ($platform === 'facebook') {
+                    $media['kind'] === 'video'
+                        ? $this->publishToFacebook($conn, $post, $media['url'], $media['title'])
+                        : $this->publishPhotoToFacebook($conn, $post, $media['url']);
+                } else {
+                    $this->startInstagram($conn, $post, $media['url'], $media['kind']);
+                }
             } catch (RuntimeException $e) {
                 $post->update(['status' => 'failed', 'error' => $e->getMessage()]);
             }
@@ -143,14 +176,42 @@ class MetaPublisher
         return $pending->count();
     }
 
-    private function publishToFacebook(MetaConnection $conn, SocialPost $post, string $videoUrl, ?string $title): void
+    /**
+     * Page posts go out with the Page's own token, which the System User
+     * token can ask for because the Page is assigned to it.
+     */
+    public function pageToken(MetaConnection $conn): string
     {
-        // Page posts go out with the Page's own token, which the System
-        // User token can ask for because the Page is assigned to it.
         $pageToken = $this->graph->call('GET', $conn->access_token, $conn->page_id, ['fields' => 'access_token'])['access_token'] ?? null;
         if (! $pageToken) {
             throw new RuntimeException('Meta didn\'t give access to your Page — make sure it\'s assigned to your System User with Full control.');
         }
+
+        return $pageToken;
+    }
+
+    private function publishPhotoToFacebook(MetaConnection $conn, SocialPost $post, string $imageUrl): void
+    {
+        $pageToken = $this->pageToken($conn);
+        $photo = $this->graph->call('POST', $pageToken, "{$conn->page_id}/photos", array_filter([
+            'url' => $imageUrl,
+            'caption' => $post->caption,
+            'published' => 'true',
+        ]));
+
+        $permalink = null;
+        try {
+            $permalink = $this->graph->call('GET', $pageToken, $photo['post_id'] ?? $photo['id'], ['fields' => 'permalink_url'])['permalink_url'] ?? null;
+        } catch (RuntimeException) {
+            // live without a link is still live
+        }
+
+        $post->update(['status' => 'published', 'external_id' => $photo['post_id'] ?? $photo['id'], 'permalink' => $permalink, 'published_at' => now()]);
+    }
+
+    private function publishToFacebook(MetaConnection $conn, SocialPost $post, string $videoUrl, ?string $title): void
+    {
+        $pageToken = $this->pageToken($conn);
 
         $video = $this->graph->call('POST', $pageToken, "{$conn->page_id}/videos", array_filter([
             'file_url' => $videoUrl,
@@ -170,16 +231,23 @@ class MetaPublisher
         $post->update(['status' => 'published', 'external_id' => $video['id'], 'permalink' => $permalink, 'published_at' => now()]);
     }
 
-    private function startInstagram(MetaConnection $conn, SocialPost $post, string $videoUrl): void
+    private function startInstagram(MetaConnection $conn, SocialPost $post, string $url, string $kind = 'video'): void
     {
-        $container = $this->graph->call('POST', $conn->access_token, "{$conn->instagram_account_id}/media", [
-            'media_type' => 'REELS',
-            'video_url' => $videoUrl,
-            'caption' => $post->caption,
-            'share_to_feed' => 'true',
-        ]);
+        $container = $this->graph->call('POST', $conn->access_token, "{$conn->instagram_account_id}/media", $kind === 'video'
+            ? ['media_type' => 'REELS', 'video_url' => $url, 'caption' => $post->caption, 'share_to_feed' => 'true']
+            : ['image_url' => $url, 'caption' => $post->caption]);
 
         $post->update(['container_id' => $container['id']]);
+
+        // A photo is usually ready at once — don't make the client wait a
+        // scheduler tick for it.
+        if ($kind === 'image') {
+            try {
+                $this->finishInstagram($post->fresh('company.metaConnection'));
+            } catch (RuntimeException) {
+                // the scheduler retries
+            }
+        }
     }
 
     private function finishInstagram(SocialPost $post): void
@@ -193,7 +261,7 @@ class MetaPublisher
         $state = $this->graph->call('GET', $conn->access_token, $post->container_id, ['fields' => 'status_code,status'])['status_code'] ?? null;
 
         if (in_array($state, ['ERROR', 'EXPIRED'], true)) {
-            throw new RuntimeException('Instagram couldn\'t process this video — Reels need 3–90 seconds, ideally 9:16.');
+            throw new RuntimeException($post->ai_image_id ? 'Instagram couldn\'t process this image — try a 1:1 or 4:5 image.' : 'Instagram couldn\'t process this video — Reels need 3–90 seconds, ideally 9:16.');
         }
         if ($state !== 'FINISHED') {
             if ($post->attempts > 30) {
