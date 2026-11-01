@@ -41,6 +41,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Meta Ads (Facebook / Instagram) — each client's own app + token
+    |--------------------------------------------------------------------------
+    */
+    'meta' => [
+        // Marketing API versions retire roughly two years after release;
+        // v26.0 shipped July 2026.
+        'graph_version' => env('META_GRAPH_VERSION', 'v26.0'),
+        // The LLM that reviews a client's campaigns (billed as AI Gateway usage).
+        'advisor_model' => env('META_ADVISOR_MODEL', 'google/gemini-2.5-pro'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Video Studio — prompt → storyboard → rendered shots → one film
     |--------------------------------------------------------------------------
     | Rendering goes through the same OpenRouter key as the AI Gateway

@@ -83,6 +83,11 @@ class Company extends Model
         return $this->hasMany(VideoProject::class);
     }
 
+    public function metaConnection(): HasOne
+    {
+        return $this->hasOne(MetaConnection::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'active';

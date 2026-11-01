@@ -25,6 +25,7 @@ use App\Http\Controllers\Auth\VerifyOtpController;
 use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\CatalogSourceController;
 use App\Http\Controllers\Client\OfferController;
+use App\Http\Controllers\Client\MetaController;
 use App\Http\Controllers\Client\OrderController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ProductController;
@@ -154,6 +155,13 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/ai', [ServiceController::class, 'ai']);
     Route::get('/services/ai/models', [ServiceController::class, 'aiModels']);
     Route::post('/services/ai/chat', [ServiceController::class, 'chatAi']);
+
+    Route::get('/meta', [MetaController::class, 'show']);
+    Route::post('/meta/inspect', [MetaController::class, 'inspect'])->middleware('throttle:20,1');
+    Route::post('/meta/connect', [MetaController::class, 'connect'])->middleware('throttle:20,1');
+    Route::delete('/meta', [MetaController::class, 'destroy']);
+    Route::get('/meta/campaigns', [MetaController::class, 'campaigns']);
+    Route::post('/meta/analyse', [MetaController::class, 'analyse'])->middleware('throttle:10,1');
 
     Route::get('/services/video', [VideoStudioController::class, 'index']);
     Route::post('/services/video/projects', [VideoStudioController::class, 'store'])->middleware('throttle:10,1');
