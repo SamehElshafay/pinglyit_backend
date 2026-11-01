@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Client;
 
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
+use App\Models\SocialPost;
 use App\Models\VideoProject;
 use App\Models\VideoShot;
 use App\Services\Billing\BillingEngine;
+use App\Services\Meta\MetaPublisher;
 use App\Services\Video\VideoDirector;
 use App\Services\Video\VideoStudioService;
 use Illuminate\Http\Request;
@@ -96,6 +98,9 @@ class VideoStudioController extends Controller
         if ($project->isActive()) {
             dispatch(fn () => app(VideoStudioService::class)->advance($project))->afterResponse();
         }
+        if (SocialPost::where('video_project_id', $project->id)->where('status', 'processing')->exists()) {
+            dispatch(fn () => app(MetaPublisher::class)->advance())->afterResponse();
+        }
 
         return response()->json($this->present($project));
     }
@@ -127,6 +132,48 @@ class VideoStudioController extends Controller
         }
 
         return response()->json($this->present($project));
+    }
+
+    /** A ready-to-post caption for this film, written by the AI (billed as AI usage). */
+    public function caption(Request $request, int $project)
+    {
+        $project = $this->find($request, $project);
+        $data = $request->validate([
+            'language' => ['nullable', Rule::in(array_keys(VideoDirector::LANGUAGES))],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        try {
+            $caption = app(MetaPublisher::class)->writeCaption(
+                $request->user()->company, $project, $data['language'] ?? ($project->language ?: 'ar-EG'), $data['notes'] ?? null,
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['caption' => $caption]);
+    }
+
+    /** Post the finished film to the client's Facebook Page and/or Instagram. */
+    public function publish(Request $request, int $project)
+    {
+        $project = $this->find($request, $project);
+        $data = $request->validate([
+            'platforms' => ['required', 'array', 'min:1'],
+            'platforms.*' => ['distinct', Rule::in(MetaPublisher::PLATFORMS)],
+            'caption' => ['nullable', 'string', 'max:2200'], // Instagram's caption limit
+        ]);
+
+        try {
+            $posts = app(MetaPublisher::class)->publish($project, $data['platforms'], (string) ($data['caption'] ?? ''));
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'posts' => collect($posts)->map(fn (SocialPost $p) => $this->presentPost($p)),
+            'project' => $this->present($project->fresh('shots')),
+        ]);
     }
 
     public function destroy(Request $request, int $project)
@@ -173,6 +220,12 @@ class VideoStudioController extends Controller
     }
 
     /** @return array<string, mixed> */
+    private function presentPost(SocialPost $p): array
+    {
+        return $p->only(['id', 'platform', 'status', 'permalink', 'error', 'published_at', 'created_at', 'caption']);
+    }
+
+    /** @return array<string, mixed> */
     private function present(VideoProject $project, bool $full = true): array
     {
         $url = fn (string $kind, int $index = 0, bool $download = false) => URL::temporarySignedRoute(
@@ -214,10 +267,15 @@ class VideoStudioController extends Controller
             return $data;
         }
 
+        $publisher = app(MetaPublisher::class);
         $planned = $board['shots'] ?? [];
         $names = collect($board['characters'] ?? [])->merge($board['products'] ?? [])->pluck('name', 'id');
 
         return $data + [
+            'publishing' => [
+                'targets' => $publisher->targets($project->company->metaConnection),
+                'posts' => SocialPost::where('video_project_id', $project->id)->latest('id')->get()->map(fn ($p) => $this->presentPost($p)),
+            ],
             'logline' => $board['logline'] ?? null,
             'style_bible' => $board['style_bible'] ?? null,
             'characters' => $board['characters'] ?? [],

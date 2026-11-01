@@ -172,6 +172,8 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::put('/services/video/projects/{project}/shots/{shot}', [VideoStudioController::class, 'updateShot'])->whereNumber(['project', 'shot']);
     Route::post('/services/video/projects/{project}/render', [VideoStudioController::class, 'render'])->whereNumber('project');
     Route::delete('/services/video/projects/{project}', [VideoStudioController::class, 'destroy'])->whereNumber('project');
+    Route::post('/services/video/projects/{project}/caption', [VideoStudioController::class, 'caption'])->whereNumber('project')->middleware('throttle:20,1');
+    Route::post('/services/video/projects/{project}/publish', [VideoStudioController::class, 'publish'])->whereNumber('project')->middleware('throttle:10,1');
 
     Route::get('/api-keys', [ApiKeyController::class, 'index']);
     Route::post('/api-keys', [ApiKeyController::class, 'store']);

@@ -1,6 +1,7 @@
 <?php
 
 use App\Console\Commands\AdvanceVideoProjects;
+use App\Console\Commands\PublishSocialPosts;
 use App\Console\Commands\ReconcileAiBilling;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -19,3 +20,7 @@ Schedule::command(ReconcileAiBilling::class)->dailyAt('03:15')->withoutOverlappi
 // "submitted" to a finished film. runInBackground so a long stitch never
 // delays the rest of the schedule.
 Schedule::command(AdvanceVideoProjects::class)->everyMinute()->withoutOverlapping(30)->runInBackground();
+
+// Instagram processes a Reel for a minute or two before it can go live;
+// this finishes those posts (see MetaPublisher).
+Schedule::command(PublishSocialPosts::class)->everyMinute()->withoutOverlapping(10);

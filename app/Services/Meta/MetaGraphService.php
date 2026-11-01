@@ -224,6 +224,25 @@ class MetaGraphService
         return [array_key_first($candidates) ?? 'Results', 0];
     }
 
+    /**
+     * A write (or any call) with the same error handling as the reads —
+     * for MetaPublisher.
+     *
+     * @return array<string, mixed>
+     */
+    public function call(string $method, string $token, string $path, array $data = []): array
+    {
+        try {
+            $response = $method === 'GET'
+                ? $this->http($token)->get("https://graph.facebook.com/{$this->version()}/{$path}", $data)
+                : $this->http($token)->timeout(120)->asForm()->post("https://graph.facebook.com/{$this->version()}/{$path}", $data);
+        } catch (ConnectionException) {
+            throw new RuntimeException("Couldn't reach Meta right now — try again in a moment.");
+        }
+
+        return $this->unwrap($response, $path);
+    }
+
     /** @return array<string, mixed> */
     private function get(string $token, string $path, array $query = []): array
     {
