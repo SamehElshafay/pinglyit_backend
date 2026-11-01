@@ -7,7 +7,9 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Company;
 use App\Services\Ai\AiGatewayService;
+use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
+use App\Services\Video\VideoStudioService;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -18,6 +20,8 @@ class ClientController extends Controller
         private readonly WhatsAppGatewayService $whatsapp,
         private readonly AiGatewayService $ai,
         private readonly ServiceConfigRepository $configs,
+        private readonly VideoStudioService $video,
+        private readonly BillingEngine $billing,
     ) {}
 
     public function index(Request $request)
@@ -36,6 +40,7 @@ class ClientController extends Controller
             'services' => array_values(array_filter([
                 $this->whatsapp->isEnabledFor($company) ? 'WhatsApp' : null,
                 $this->ai->isEnabledFor($company) ? 'AI' : null,
+                $this->video->isEnabledFor($company) ? 'Video' : null,
             ])),
             'joined' => $company->created_at,
         ]));
@@ -61,7 +66,53 @@ class ClientController extends Controller
                 'enabled' => $this->ai->isEnabledFor($company),
                 'pricing' => $this->ai->pricingFor($company),
             ],
+            'video' => $this->videoState($company),
         ]);
+    }
+
+    /**
+     * Video Studio for one client: on/off, and an optional blanket
+     * multiplier that beats the platform's per-model rates for them.
+     */
+    public function updateVideoConfig(Request $request, Company $company)
+    {
+        $data = $request->validate([
+            'enabled' => ['sometimes', 'boolean'],
+            'multiplier' => ['sometimes', 'nullable', 'numeric', 'min:1'],
+        ]);
+
+        if (array_key_exists('enabled', $data)) {
+            $this->video->setEnabledFor($company, $data['enabled']);
+        }
+
+        if (array_key_exists('multiplier', $data)) {
+            $this->configs->setClientFlag($company, ServiceType::Video, 'multiplier', $data['multiplier']);
+        }
+
+        if ($data !== []) {
+            AuditLog::record(
+                $request->user(),
+                'client.video_config.update',
+                $this->describeClientConfigChange('Video Studio', $data),
+                $company,
+                $data,
+            );
+        }
+
+        return response()->json(['video' => $this->videoState($company)]);
+    }
+
+    /** @return array<string, mixed> */
+    private function videoState(Company $company): array
+    {
+        return [
+            'enabled' => $this->video->isEnabledFor($company),
+            'multiplier' => $this->configs->clientOverride($company, ServiceType::Video)?->pricing_config['multiplier'] ?? null,
+            'default_multiplier' => (float) ($this->configs->platformDefault(ServiceType::Video)['multiplier'] ?? config('pingly.video.default_multiplier')),
+            'reserved' => $this->billing->reservedFor($company),
+            'films' => $company->videoProjects()->where('status', 'completed')->count(),
+            'spent' => (float) $company->usageEvents()->where('service_type', ServiceType::Video)->sum('billed_amount_to_client'),
+        ];
     }
 
     public function updateWhatsappConfig(Request $request, Company $company)

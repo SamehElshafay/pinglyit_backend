@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Models\UsageEvent;
+use App\Models\VideoProject;
 use App\Models\Wallet;
 use App\Models\WalletAdjustment;
 use Illuminate\Support\Carbon;
@@ -22,6 +23,10 @@ class OverviewController extends Controller
             'revenue_this_period' => (float) (clone $usageThisPeriod)->sum('billed_amount_to_client')
                 - (float) (clone $usageThisPeriod)->sum('raw_cost_to_pingly'),
             'whatsapp_messages_this_period' => (clone $usageThisPeriod)->where('service_type', ServiceType::WhatsApp)->count(),
+            'video_films_this_period' => VideoProject::where('status', 'completed')->where('completed_at', '>=', $periodStart)->count(),
+            'video_seconds_this_period' => (int) (clone $usageThisPeriod)->where('service_type', ServiceType::Video)
+                ->get()->sum(fn ($event) => (int) ($event->metadata['seconds'] ?? 0)),
+            'video_rendering_now' => VideoProject::whereIn('status', VideoProject::ACTIVE_STATUSES)->count(),
             'ai_tokens_billed_this_period' => (float) (clone $usageThisPeriod)->where('service_type', ServiceType::Ai)
                 ->get()->sum(fn ($event) => (float) ($event->metadata['billed_tokens'] ?? 0)),
             // Starting slice — a real activity feed would also union signups

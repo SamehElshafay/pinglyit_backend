@@ -89,6 +89,13 @@ class AiGatewayService
 
     public function multiplierFor(Company $company, ?string $model = null): float
     {
+        // A per-client multiplier is a blanket rate for that client (see
+        // the class docblock) — it beats the platform's per-model list.
+        $clientMultiplier = $this->configs->clientOverride($company, ServiceType::Ai)?->pricing_config['multiplier'] ?? null;
+        if ($clientMultiplier !== null) {
+            return (float) $clientMultiplier;
+        }
+
         $pricing = $this->pricingFor($company);
 
         if ($model && isset($pricing['model_overrides'][$model])) {

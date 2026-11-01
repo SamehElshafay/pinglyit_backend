@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Rules\ChatMessageContent;
 use App\Services\Ai\AiGatewayService;
+use App\Services\Video\VideoStudioService;
 use App\Services\WhatsApp\WhatsAppEmbeddedSignupService;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
@@ -31,6 +32,7 @@ class ServiceController extends Controller
         // entry back here when it's offered again.
         return response()->json([
             ['key' => 'ai', 'name' => ServiceType::Ai->label(), 'enabled' => $this->ai->isEnabledFor($company)],
+            ['key' => 'video', 'name' => ServiceType::Video->label(), 'enabled' => app(VideoStudioService::class)->isEnabledFor($company)],
         ]);
     }
 

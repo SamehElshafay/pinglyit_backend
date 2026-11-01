@@ -11,6 +11,8 @@ use App\Http\Controllers\Admin\MailConnectionController;
 use App\Http\Controllers\Admin\OverviewController as AdminOverviewController;
 use App\Http\Controllers\Admin\PaymentConnectionController;
 use App\Http\Controllers\Admin\ReconciliationController;
+use App\Http\Controllers\Admin\VideoPricingController;
+use App\Http\Controllers\Admin\VideoProjectController;
 use App\Http\Controllers\Admin\WalletAdjustmentController;
 use App\Http\Controllers\Admin\WhatsappLogController;
 use App\Http\Controllers\Admin\WhatsappPricingController;
@@ -27,6 +29,7 @@ use App\Http\Controllers\Client\OrderController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ProductController;
 use App\Http\Controllers\Client\ServiceController;
+use App\Http\Controllers\Client\VideoStudioController;
 use App\Http\Controllers\Client\WalletController;
 use App\Http\Controllers\Client\WhatsappInboxController;
 use App\Http\Controllers\Gateway\AiController as GatewayAiController;
@@ -110,6 +113,14 @@ Route::middleware('throttle:10,1')->group(function () {
     Route::post('/reset-password', [PasswordResetController::class, 'reset']);
 });
 
+// Video Studio media — signed and short-lived, no JWT, because a <video>
+// tag can't send an Authorization header. See VideoStudioController::media().
+Route::get('/video-media/{project}/{kind}/{index?}', [VideoStudioController::class, 'media'])
+    ->middleware('signed')
+    ->whereIn('kind', ['film', 'poster', 'shot', 'reference'])
+    ->whereNumber('index')
+    ->name('video.media');
+
 Route::middleware(['jwt', 'client'])->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy']);
     Route::get('/me', [LoginController::class, 'me']);
@@ -143,6 +154,13 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/ai', [ServiceController::class, 'ai']);
     Route::get('/services/ai/models', [ServiceController::class, 'aiModels']);
     Route::post('/services/ai/chat', [ServiceController::class, 'chatAi']);
+
+    Route::get('/services/video', [VideoStudioController::class, 'index']);
+    Route::post('/services/video/projects', [VideoStudioController::class, 'store'])->middleware('throttle:10,1');
+    Route::get('/services/video/projects/{project}', [VideoStudioController::class, 'show'])->whereNumber('project');
+    Route::put('/services/video/projects/{project}/shots/{shot}', [VideoStudioController::class, 'updateShot'])->whereNumber(['project', 'shot']);
+    Route::post('/services/video/projects/{project}/render', [VideoStudioController::class, 'render'])->whereNumber('project');
+    Route::delete('/services/video/projects/{project}', [VideoStudioController::class, 'destroy'])->whereNumber('project');
 
     Route::get('/api-keys', [ApiKeyController::class, 'index']);
     Route::post('/api-keys', [ApiKeyController::class, 'store']);
@@ -196,6 +214,11 @@ Route::prefix('admin')->group(function () {
         Route::get('/ai/pricing', [AiPricingController::class, 'show']);
         Route::put('/ai/pricing', [AiPricingController::class, 'update']);
         Route::get('/ai/logs', [AiLogController::class, 'index']);
+        Route::get('/video/pricing', [VideoPricingController::class, 'show']);
+        Route::put('/video/pricing', [VideoPricingController::class, 'update']);
+        Route::get('/video/projects', [VideoProjectController::class, 'index']);
+        Route::put('/clients/{company}/video-config', [ClientController::class, 'updateVideoConfig']);
+
         Route::get('/ai/connection', [AiConnectionController::class, 'show']);
         Route::put('/ai/connection', [AiConnectionController::class, 'update']);
         Route::delete('/ai/connection', [AiConnectionController::class, 'destroy']);

@@ -78,6 +78,11 @@ class Company extends Model
         return $this->hasMany(WhatsappConversation::class);
     }
 
+    public function videoProjects(): HasMany
+    {
+        return $this->hasMany(VideoProject::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'active';

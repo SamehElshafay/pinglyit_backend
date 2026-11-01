@@ -6,6 +6,8 @@ use App\Enums\ServiceType;
 use App\Models\AdminUser;
 use App\Models\Company;
 use App\Models\UsageEvent;
+use App\Models\VideoProject;
+use App\Models\VideoShot;
 use App\Models\WalletAdjustment;
 use App\Models\WalletTopup;
 use Illuminate\Support\Facades\DB;
@@ -25,9 +27,29 @@ class BillingEngine
      */
     public function hasSufficientBalance(Company $company, float $estimatedCost): bool
     {
-        $wallet = $company->wallet;
+        return $company->wallet !== null && $this->availableBalance($company) >= $estimatedCost;
+    }
 
-        return $wallet !== null && (float) $wallet->balance >= $estimatedCost;
+    /**
+     * Money already promised to work in progress: the quotes of video shots
+     * a client approved that haven't rendered (and so haven't been billed)
+     * yet. Held back from every other service, so a client can't approve a
+     * $20 film on a $20 balance and then spend the same $20 on AI requests
+     * while it renders.
+     */
+    public function reservedFor(Company $company): float
+    {
+        return (float) VideoShot::query()
+            ->whereIn('status', ['pending', 'submitted'])
+            ->whereHas('project', fn ($q) => $q->where('company_id', $company->id)
+                ->whereIn('status', VideoProject::ACTIVE_STATUSES))
+            ->sum('quoted_amount');
+    }
+
+    /** Wallet balance minus what's reserved — what a new request may spend. */
+    public function availableBalance(Company $company): float
+    {
+        return (float) ($company->wallet->balance ?? 0) - $this->reservedFor($company);
     }
 
     /**
@@ -45,6 +67,10 @@ class BillingEngine
      * loses real money to it. Tripping it never blocks the request; it caps
      * the charge and logs loudly so it gets caught, not silently eaten.
      *
+     * A service whose single unit is legitimately bigger than that (one
+     * rendered video shot can cost several dollars on its own) passes its
+     * own `$cap` — a ceiling sized to *its* unit, never "no ceiling".
+     *
      * @param  array<string, mixed>  $metadata  service-specific detail (category/country, model/tokens, etc.)
      */
     public function recordUsage(
@@ -54,8 +80,9 @@ class BillingEngine
         float $billedAmountToClient,
         ?float $multiplierOrMargin = null,
         array $metadata = [],
+        ?float $cap = null,
     ): UsageEvent {
-        $cap = (float) config('pingly.max_billed_per_event');
+        $cap ??= (float) config('pingly.max_billed_per_event');
 
         if ($cap > 0 && $billedAmountToClient > $cap) {
             Log::critical('Billing safety cap triggered — charge capped, does not reflect the raw calculation', [

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Client;
 
 use App\Contracts\PaymentGateway;
 use App\Http\Controllers\Controller;
+use App\Services\Billing\BillingEngine;
 use Illuminate\Http\Request;
 
 class WalletController extends Controller
@@ -30,6 +31,9 @@ class WalletController extends Controller
 
         return response()->json([
             'balance' => (float) ($company->wallet->balance ?? 0),
+            // Held for Video Studio renders in progress — part of the
+            // balance, but not spendable on anything else until they finish.
+            'reserved' => app(BillingEngine::class)->reservedFor($company),
             'currency' => $company->wallet->currency ?? 'USD',
             'transactions' => $transactions,
         ]);

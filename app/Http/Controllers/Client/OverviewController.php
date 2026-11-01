@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Client;
 
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
+use App\Models\VideoProject;
+use App\Services\Billing\BillingEngine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -22,12 +24,21 @@ class OverviewController extends Controller
             // in requests and the other in dollars.
             'whatsapp_requests_this_period' => (clone $events)->where('service_type', ServiceType::WhatsApp)->count(),
             'ai_requests_this_period' => (clone $events)->where('service_type', ServiceType::Ai)->count(),
+            'video_films_this_period' => $company->videoProjects()->where('status', 'completed')->where('completed_at', '>=', $periodStart)->count(),
+            'video_rendering_now' => $company->videoProjects()->whereIn('status', VideoProject::ACTIVE_STATUSES)->count(),
+            'reserved' => app(BillingEngine::class)->reservedFor($company),
             'daily_usage' => $this->dailyUsage($company->id),
             // WhatsApp Gateway is hidden across the dashboard for now (see
             // user_website's AppShell.vue nav) — excluded here too, so a
             // logged event never resurfaces as a line of activity text.
-            'recent_activity' => $company->usageEvents()->where('service_type', ServiceType::Ai)->latest()->limit(10)->get()
-                ->map(fn ($e) => ['time' => $e->created_at, 'event' => 'AI request']),
+            'recent_activity' => $company->usageEvents()->whereIn('service_type', [ServiceType::Ai, ServiceType::Video])->latest()->limit(10)->get()
+                ->map(fn ($e) => [
+                    'time' => $e->created_at,
+                    'event' => $e->service_type === ServiceType::Video
+                        ? 'Video shot rendered ('.($e->metadata['seconds'] ?? '?').'s)'
+                        : 'AI request',
+                    'amount' => (float) $e->billed_amount_to_client,
+                ]),
         ]);
     }
 
@@ -35,7 +46,7 @@ class OverviewController extends Controller
      * 14 days, zero-filled (a day with no requests must still be a point on
      * the chart, not a gap) — one row per day with both series' counts.
      *
-     * @return array<int, array{date: string, whatsapp: int, ai: int}>
+     * @return array<int, array{date: string, whatsapp: int, ai: int, video: int}>
      */
     private function dailyUsage(int $companyId): array
     {
@@ -57,6 +68,7 @@ class OverviewController extends Controller
                 'date' => $date,
                 'whatsapp' => (int) optional($dayRows->firstWhere('service_type', 'whatsapp'))->requests,
                 'ai' => (int) optional($dayRows->firstWhere('service_type', 'ai'))->requests,
+                'video' => (int) optional($dayRows->firstWhere('service_type', 'video'))->requests,
             ];
         })->values()->all();
     }

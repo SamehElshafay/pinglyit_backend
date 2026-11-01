@@ -16,20 +16,29 @@ use App\Models\ServiceConfig;
 class ServiceConfigRepository
 {
     /**
+     * The client's override layered over the platform default: any key the
+     * override sets wins, every key it doesn't set comes from the platform.
+     *
+     * This used to return the override *instead of* the default, which
+     * meant any per-client row — even one holding nothing but an
+     * "enabled" flag from the on/off toggle — silently threw away every
+     * platform setting it didn't repeat: AI's per-model price list (so the
+     * client's model picker went empty) and WhatsApp's base-cost table (so
+     * every send failed with "no base cost configured").
+     *
      * @return array<string, mixed> the effective pricing_config for this company + service
      */
     public function resolve(Company $company, ServiceType $service): array
     {
-        $override = ServiceConfig::query()
-            ->where('company_id', $company->id)
-            ->where('service_type', $service)
-            ->first();
+        // A cleared field is stored as null ("no override") — it must fall
+        // through to the platform value, never override it with nothing
+        // (a null multiplier would otherwise price a request at 0×).
+        $override = array_filter(
+            $this->clientOverride($company, $service)?->pricing_config ?? [],
+            fn ($v) => $v !== null,
+        );
 
-        if ($override) {
-            return $override->pricing_config;
-        }
-
-        return $this->platformDefault($service);
+        return array_merge($this->platformDefault($service), $override);
     }
 
     public function platformDefault(ServiceType $service): array
@@ -88,12 +97,26 @@ class ServiceConfigRepository
     public function setClientOverride(Company $company, ServiceType $service, ?array $config): void
     {
         if ($config === null) {
+            $enabled = $this->clientOverride($company, $service)?->pricing_config['enabled'] ?? null;
+
             ServiceConfig::query()
                 ->where('company_id', $company->id)
                 ->where('service_type', $service)
                 ->delete();
 
+            if ($enabled !== null) {
+                $this->setClientFlag($company, $service, 'enabled', $enabled);
+            }
+
             return;
+        }
+
+        // The on/off flag lives in the same row but is set separately (see
+        // setClientFlag) — saving pricing must not quietly re-enable a
+        // service the admin switched off for this client.
+        $existing = $this->clientOverride($company, $service)?->pricing_config ?? [];
+        if (array_key_exists('enabled', $existing) && ! array_key_exists('enabled', $config)) {
+            $config['enabled'] = $existing['enabled'];
         }
 
         ServiceConfig::query()->updateOrCreate(

@@ -41,6 +41,41 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Video Studio — prompt → storyboard → rendered shots → one film
+    |--------------------------------------------------------------------------
+    | Rendering goes through the same OpenRouter key as the AI Gateway
+    | (/api/v1/videos); see App\Services\Video\VideoStudioService.
+    */
+    'video' => [
+        // Fallback margin on the real render cost when the admin hasn't set
+        // a per-model one. Lower than chat's 5x: video is a large absolute
+        // cost per job, and the price is shown to the client up front.
+        'default_multiplier' => (float) env('VIDEO_DEFAULT_MULTIPLIER', 2),
+
+        // The LLM that writes the storyboard. Billed to the client as an
+        // ordinary AI Gateway request.
+        'director_model' => env('VIDEO_DIRECTOR_MODEL', 'google/gemini-2.5-pro'),
+
+        // Longest film a client can order, in seconds.
+        'max_duration' => (int) env('VIDEO_MAX_DURATION', 180),
+
+        // Per-shot billing ceiling (replaces max_billed_per_event for video
+        // only — a 15s 1080p shot is legitimately more than $5).
+        'max_billed_per_shot' => (float) env('VIDEO_MAX_BILLED_PER_SHOT', 25),
+
+        // Shots in flight at once per project.
+        'parallel_shots' => (int) env('VIDEO_PARALLEL_SHOTS', 4),
+
+        // How often to resubmit a shot the provider failed, before giving up.
+        'max_attempts' => (int) env('VIDEO_MAX_ATTEMPTS', 3),
+
+        // Needed to join shots into one film. Single-shot videos work without it.
+        'ffmpeg' => env('FFMPEG_BINARY', 'ffmpeg'),
+        'ffprobe' => env('FFPROBE_BINARY', 'ffprobe'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Wallet top-up payment gateway
     |--------------------------------------------------------------------------
     | 'stripe' | 'tap' | 'cryptomus' | 'none' (disables top-ups —
