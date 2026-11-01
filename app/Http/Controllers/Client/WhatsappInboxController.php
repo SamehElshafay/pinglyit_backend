@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Client;
 
 use App\Http\Controllers\Controller;
 use App\Models\Company;
+use App\Models\WhatsappConversation;
+use App\Models\WhatsappLead;
 use App\Models\WhatsappMessage;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
@@ -89,6 +91,13 @@ class WhatsappInboxController extends Controller
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
+
+        // A person stepped in: the AI stays out of this conversation until
+        // they hand it back (Leads → "Let AI continue"), and remembers what
+        // the person said if it does.
+        WhatsappLead::for($company->id, $data['phone'])->update(['ai_paused' => true, 'handoff_reason' => 'A team member replied from the dashboard.']);
+        $conversation = WhatsappConversation::firstOrCreate(['company_id' => $company->id, 'customer_phone' => $data['phone']], ['messages' => []]);
+        $conversation->update(['messages' => array_slice([...$conversation->messages, ['role' => 'assistant', 'content' => $data['body']]], -30)]);
 
         return response()->json([
             'messages' => WhatsappMessage::forCompany($company->id)

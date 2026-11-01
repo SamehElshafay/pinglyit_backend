@@ -79,6 +79,33 @@ class WhatsAppGatewayService
     }
 
     /**
+     * Blue ticks + "typing…" on the customer's phone while the AI writes —
+     * what a person replying would look like. Best-effort and free: if Meta
+     * refuses it (older API version, message too old), nothing else changes.
+     */
+    public function markReadAndTyping(WhatsappAccount $account, string $messageId): void
+    {
+        $token = $this->tokenFor($account);
+        if (blank($token) || blank($account->phone_number_id)) {
+            return;
+        }
+
+        try {
+            Http::withToken($token)->timeout(10)->post(
+                'https://graph.facebook.com/'.config('pingly.whatsapp.api_version')."/{$account->phone_number_id}/messages",
+                [
+                    'messaging_product' => 'whatsapp',
+                    'status' => 'read',
+                    'message_id' => $messageId,
+                    'typing_indicator' => ['type' => 'text'],
+                ],
+            );
+        } catch (\Throwable) {
+            // cosmetic only
+        }
+    }
+
+    /**
      * Ask Meta whether this phone number id + token pair actually works,
      * before anything is stored.
      *

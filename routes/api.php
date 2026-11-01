@@ -24,8 +24,8 @@ use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\VerifyOtpController;
 use App\Http\Controllers\Client\ApiKeyController;
 use App\Http\Controllers\Client\CatalogSourceController;
-use App\Http\Controllers\Client\OfferController;
 use App\Http\Controllers\Client\MetaController;
+use App\Http\Controllers\Client\OfferController;
 use App\Http\Controllers\Client\OrderController;
 use App\Http\Controllers\Client\OverviewController as ClientOverviewController;
 use App\Http\Controllers\Client\ProductController;
@@ -33,6 +33,7 @@ use App\Http\Controllers\Client\ServiceController;
 use App\Http\Controllers\Client\VideoStudioController;
 use App\Http\Controllers\Client\WalletController;
 use App\Http\Controllers\Client\WhatsappInboxController;
+use App\Http\Controllers\Client\WhatsappLeadController;
 use App\Http\Controllers\Gateway\AiController as GatewayAiController;
 use App\Http\Controllers\Gateway\BalanceController as GatewayBalanceController;
 use App\Http\Controllers\Gateway\OfferController as GatewayOfferController;
@@ -140,6 +141,8 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/whatsapp/conversations', [WhatsappInboxController::class, 'conversations']);
     Route::get('/whatsapp/messages', [WhatsappInboxController::class, 'messages']);
     Route::post('/whatsapp/messages', [WhatsappInboxController::class, 'send']);
+    Route::get('/whatsapp/leads', [WhatsappLeadController::class, 'index']);
+    Route::put('/whatsapp/leads/{lead}', [WhatsappLeadController::class, 'update'])->whereNumber('lead');
 
     // Catalog pulled from the company's own product API.
     Route::get('/catalog-source', [CatalogSourceController::class, 'show']);

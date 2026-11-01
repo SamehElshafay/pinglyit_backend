@@ -10,9 +10,10 @@ class WhatsappAccount extends Model
     protected $fillable = [
         'company_id', 'waba_id', 'phone_number_id', 'registration_pin', 'access_token', 'phone_number', 'status', 'connected_at',
         'ai_autoreply_enabled', 'ai_autoreply_model', 'ai_autoreply_system_prompt', 'ai_commerce_enabled',
+        'ai_agent_profile', 'app_secret',
     ];
 
-    protected $hidden = ['registration_pin', 'access_token'];
+    protected $hidden = ['registration_pin', 'access_token', 'app_secret'];
 
     protected function casts(): array
     {
@@ -20,6 +21,8 @@ class WhatsappAccount extends Model
             'connected_at' => 'datetime',
             'registration_pin' => 'encrypted',
             'access_token' => 'encrypted',
+            'app_secret' => 'encrypted',
+            'ai_agent_profile' => 'array',
             'ai_autoreply_enabled' => 'boolean',
             'ai_commerce_enabled' => 'boolean',
         ];

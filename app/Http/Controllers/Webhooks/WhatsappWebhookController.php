@@ -6,10 +6,12 @@ use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Models\UsageEvent;
 use App\Models\WhatsappAccount;
+use App\Models\WhatsappLead;
 use App\Models\WhatsappMessage;
 use App\Services\WhatsApp\AiCommerceAgentService;
 use App\Services\WhatsApp\WhatsappAutoReplyService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -19,11 +21,6 @@ use Illuminate\Support\Facades\Log;
  */
 class WhatsappWebhookController extends Controller
 {
-    public function __construct(
-        private readonly WhatsappAutoReplyService $autoReply,
-        private readonly AiCommerceAgentService $commerceAgent,
-    ) {}
-
     /**
      * The one-time handshake Meta does when you save the webhook URL in
      * the App Dashboard. Must echo back hub_challenge as plain text.
@@ -57,7 +54,19 @@ class WhatsappWebhookController extends Controller
                 $phoneNumberId = $value['metadata']['phone_number_id'] ?? null;
                 $account = $phoneNumberId ? WhatsappAccount::where('phone_number_id', $phoneNumberId)->first() : null;
 
+                if ($account && ! $this->signatureIsValid($request, $account)) {
+                    Log::warning('WhatsApp webhook with a bad signature — ignored', ['phone_number_id' => $phoneNumberId]);
+
+                    return response('Invalid signature', 403);
+                }
+
                 foreach ($value['messages'] ?? [] as $message) {
+                    // Meta retries a delivery it isn't sure landed. The same
+                    // message twice must not mean two AI replies (and two bills).
+                    if (filled($message['id'] ?? null) && WhatsappMessage::where('wa_message_id', $message['id'])->exists()) {
+                        continue;
+                    }
+
                     if ($account) {
                         UsageEvent::create([
                             'company_id' => $account->company_id,
@@ -89,12 +98,33 @@ class WhatsappWebhookController extends Controller
                         // exclusive per number — see the ai_commerce_enabled
                         // migration's docblock for why commerce wins if both
                         // are somehow on.
+                        if (filled($message['from'] ?? null)) {
+                            $lead = WhatsappLead::for($account->company_id, $message['from']);
+                            $lead->increment('messages_count', 1, [
+                                'last_message_at' => now(),
+                                'customer_name' => $lead->customer_name ?: ($value['contacts'][0]['profile']['name'] ?? null),
+                            ]);
+                        }
+
+                        // The AI runs after Meta has its 200: a model can take
+                        // longer than Meta waits, and a timed-out webhook gets
+                        // redelivered — which used to mean duplicate replies.
                         if (($message['type'] ?? null) === 'text' && filled($text) && filled($message['from'] ?? null)) {
-                            if ($account->ai_commerce_enabled) {
-                                $this->commerceAgent->handleInboundMessage($account, $message['from'], $text);
-                            } else {
-                                $this->autoReply->handleInboundMessage($account, $message['from'], $text);
-                            }
+                            $from = $message['from'];
+                            $messageId = $message['id'] ?? null;
+                            dispatch(function () use ($account, $from, $text, $messageId) {
+                                // At most one AI reply per inbound message id — also covers
+                                // two copies of a delivery racing past the check above.
+                                if ($messageId && ! Cache::add("wa-ai-reply:{$messageId}", 1, now()->addDay())) {
+                                    return;
+                                }
+
+                                if ($account->ai_commerce_enabled) {
+                                    app(AiCommerceAgentService::class)->handleInboundMessage($account, $from, $text, $messageId);
+                                } else {
+                                    app(WhatsappAutoReplyService::class)->handleInboundMessage($account, $from, $text);
+                                }
+                            })->afterResponse();
                         }
                     } else {
                         Log::warning('WhatsApp inbound message for unknown phone_number_id', ['phone_number_id' => $phoneNumberId]);
@@ -121,5 +151,36 @@ class WhatsappWebhookController extends Controller
 
         // Meta only cares that this returns 200 quickly — it retries otherwise.
         return response('ok', 200);
+    }
+
+    /**
+     * Meta signs every webhook with the sending app's secret
+     * (X-Hub-Signature-256: sha256=HMAC(body)). A number connected with
+     * the client's own Meta app is signed with *their* app secret, one
+     * connected through Pingly's Embedded Signup with Pingly's — so either
+     * may be the right key. With neither known there's nothing to check
+     * against; that's accepted (and the client is asked for their secret
+     * on the connect screen) rather than breaking numbers connected before
+     * secrets were collected.
+     */
+    private function signatureIsValid(Request $request, WhatsappAccount $account): bool
+    {
+        $secrets = array_filter([$account->app_secret, config('pingly.whatsapp.app_secret')]);
+        if (! $secrets) {
+            return true;
+        }
+
+        $header = (string) $request->header('X-Hub-Signature-256', '');
+        if (! str_starts_with($header, 'sha256=')) {
+            return false;
+        }
+
+        foreach ($secrets as $secret) {
+            if (hash_equals(hash_hmac('sha256', $request->getContent(), $secret), substr($header, 7))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

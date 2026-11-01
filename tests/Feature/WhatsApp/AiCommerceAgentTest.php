@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Order;
 use App\Models\PlatformSetting;
 use App\Models\WhatsappAccount;
+use App\Services\Auth\JwtService;
 use App\Services\Billing\ServiceConfigRepository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -48,7 +49,7 @@ class AiCommerceAgentTest extends TestCase
                 'changes' => [[
                     'value' => [
                         'metadata' => ['phone_number_id' => $account->phone_number_id],
-                        'messages' => [['from' => $from, 'id' => 'wamid.test', 'type' => 'text', 'text' => ['body' => $text]]],
+                        'messages' => [['from' => $from, 'id' => 'wamid.'.md5($text), 'type' => 'text', 'text' => ['body' => $text]]],
                     ],
                 ]],
             ]],
@@ -99,7 +100,7 @@ class AiCommerceAgentTest extends TestCase
                 && str_contains($request['messages'][0]['content'], 'T-Shirt')
                 && str_contains($request['messages'][0]['content'], '20');
         });
-        Http::assertSent(fn ($r) => str_contains($r->url(), 'graph.facebook.com') && $r['text']['body'] === 'We have a T-Shirt for $20!');
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'graph.facebook.com') && ($r['text']['body'] ?? null) === 'We have a T-Shirt for $20!');
     }
 
     public function test_it_creates_a_pending_order_via_a_tool_call_then_replies(): void
@@ -133,7 +134,7 @@ class AiCommerceAgentTest extends TestCase
         $this->assertSame(1, $order->items()->count());
         $this->assertSame(2, $order->items()->first()->quantity);
 
-        Http::assertSent(fn ($r) => str_contains($r->url(), 'graph.facebook.com') && str_contains($r['text']['body'], 'confirm'));
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'graph.facebook.com') && str_contains($r['text']['body'] ?? '', 'confirm'));
     }
 
     public function test_it_confirms_a_pending_order_via_a_tool_call(): void
@@ -188,7 +189,7 @@ class AiCommerceAgentTest extends TestCase
         $this->postJson('/api/webhooks/whatsapp', $this->inboundPayload($account, 'confirm order '.$order->id))->assertOk();
 
         $this->assertSame('pending_confirmation', $order->fresh()->status);
-        Http::assertSent(function ($r) use ($order) {
+        Http::assertSent(function ($r) {
             if (! str_contains($r->url(), '/chat/completions')) {
                 return false;
             }
@@ -263,7 +264,7 @@ class AiCommerceAgentTest extends TestCase
     public function test_client_can_turn_on_commerce_only_after_picking_a_model(): void
     {
         $account = $this->makeAccount(['ai_commerce_enabled' => false, 'ai_autoreply_model' => null]);
-        $token = app(\App\Services\Auth\JwtService::class)->issue($account->company->users()->create([
+        $token = app(JwtService::class)->issue($account->company->users()->create([
             'name' => 'Demo', 'email' => 'demo@example.test', 'password' => 'password',
         ]), 'user')['token'];
 

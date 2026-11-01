@@ -10,6 +10,7 @@ use App\Models\UsageEvent;
 use App\Models\User;
 use App\Services\Auth\JwtService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -130,7 +131,7 @@ class MetaAdsTest extends TestCase
         $this->fakeMeta();
         $this->connect();
         Cache::flush();
-        Http::swap(new \Illuminate\Http\Client\Factory); // drop the earlier stubs, which would still match first
+        Http::swap(new Factory); // drop the earlier stubs, which would still match first
         Http::fake(['graph.facebook.com/*' => Http::response(['error' => ['code' => 190, 'message' => 'Session has expired']], 400)]);
 
         $this->withToken($this->jwt)->getJson('/api/meta/campaigns')->assertStatus(422)

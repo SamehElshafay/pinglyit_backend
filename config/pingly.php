@@ -13,7 +13,7 @@ return [
         'app_id' => env('META_WHATSAPP_APP_ID'),
         'app_secret' => env('META_WHATSAPP_APP_SECRET'),
         'access_token' => env('META_WHATSAPP_ACCESS_TOKEN'),
-        'api_version' => env('META_WHATSAPP_API_VERSION', 'v21.0'),
+        'api_version' => env('META_WHATSAPP_API_VERSION', 'v26.0'),
         // Whatever string you set here also goes into Meta's webhook config
         // screen (Verify Token) — Meta echoes it back on setup to prove it's
         // really you configuring the endpoint.

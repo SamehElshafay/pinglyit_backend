@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Rules\ChatMessageContent;
 use App\Services\Ai\AiGatewayService;
 use App\Services\Video\VideoStudioService;
+use App\Services\WhatsApp\AiCommerceAgentService;
 use App\Services\WhatsApp\WhatsAppEmbeddedSignupService;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
@@ -24,13 +25,10 @@ class ServiceController extends Controller
     {
         $company = $request->user()->company;
 
-        // WhatsApp Gateway is deliberately left out of this list — it's
-        // hidden from the client dashboard entirely for now. Nothing about
-        // the service itself is gone (every endpoint below still works, and
-        // admins still see it); it just isn't offered on any client-facing
-        // screen, so it shouldn't be advertised in this list either. Add the
-        // entry back here when it's offered again.
+        // WhatsApp is offered again, as the AI Sales Agent on the client's
+        // own number (see AiCommerceAgentService).
         return response()->json([
+            ['key' => 'whatsapp', 'name' => 'WhatsApp AI Sales', 'enabled' => (bool) $this->whatsapp->connectedAccountFor($company)],
             ['key' => 'ai', 'name' => ServiceType::Ai->label(), 'enabled' => $this->ai->isEnabledFor($company)],
             ['key' => 'video', 'name' => ServiceType::Video->label(), 'enabled' => app(VideoStudioService::class)->isEnabledFor($company)],
         ]);
@@ -59,6 +57,7 @@ class ServiceController extends Controller
             'waba_id' => ['required', 'string', 'max:64'],
             'access_token' => ['required', 'string', 'min:20'],
             'phone_number' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'app_secret' => ['sometimes', 'nullable', 'string', 'regex:/^[a-f0-9]{32}$/i'],
         ]);
 
         $company = $request->user()->company;
@@ -79,6 +78,7 @@ class ServiceController extends Controller
                 'waba_id' => $data['waba_id'],
                 'access_token' => $data['access_token'],
                 'phone_number' => $data['phone_number'] ?? $check['phone_number'],
+                'app_secret' => $data['app_secret'] ?? null,
                 'status' => 'connected',
                 'connected_at' => now(),
             ],
@@ -131,7 +131,9 @@ class ServiceController extends Controller
                 'enabled' => $account->ai_commerce_enabled,
                 'model' => $account->ai_autoreply_model,
                 'system_prompt' => $account->ai_autoreply_system_prompt,
+                'profile' => (object) ($account->ai_agent_profile ?? []),
             ] : null,
+            'webhook_signed' => $account ? filled($account->app_secret) || filled(config('pingly.whatsapp.app_secret')) : false,
             'autoreply_models' => $this->ai->availableModelsFor($company),
         ]);
     }
@@ -228,6 +230,13 @@ class ServiceController extends Controller
             'enabled' => ['required', 'boolean'],
             'model' => ['nullable', 'string'],
             'system_prompt' => ['nullable', 'string', 'max:4000'],
+            'profile' => ['sometimes', 'array'],
+            'profile.persona_name' => ['nullable', 'string', 'max:60'],
+            'profile.business' => ['nullable', 'string', 'max:4000'],
+            'profile.policies' => ['nullable', 'string', 'max:4000'],
+            'profile.style_samples' => ['nullable', 'string', 'max:6000'],
+            'profile.handoff_rules' => ['nullable', 'string', 'max:2000'],
+            'profile.notes_language' => ['nullable', 'in:ar,en'],
         ]);
 
         $company = $request->user()->company;
@@ -238,19 +247,23 @@ class ServiceController extends Controller
         }
 
         if ($data['enabled'] && blank($data['model'] ?? null)) {
-            return response()->json(['message' => 'Pick a model before turning the AI Commerce Assistant on.'], 422);
+            return response()->json(['message' => 'Pick a model before turning the AI Sales Agent on.'], 422);
         }
 
         $account->update([
             'ai_commerce_enabled' => $data['enabled'],
             'ai_autoreply_model' => $data['model'] ?? $account->ai_autoreply_model,
             'ai_autoreply_system_prompt' => $data['system_prompt'] ?? null,
+            'ai_agent_profile' => array_key_exists('profile', $data)
+                ? array_intersect_key($data['profile'], array_flip(AiCommerceAgentService::PROFILE_FIELDS))
+                : $account->ai_agent_profile,
         ]);
 
         return response()->json([
             'enabled' => $account->ai_commerce_enabled,
             'model' => $account->ai_autoreply_model,
             'system_prompt' => $account->ai_autoreply_system_prompt,
+            'profile' => (object) ($account->ai_agent_profile ?? []),
         ]);
     }
 
