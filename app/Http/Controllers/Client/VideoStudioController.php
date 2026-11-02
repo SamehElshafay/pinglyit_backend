@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Client;
 use App\Enums\ServiceType;
 use App\Http\Controllers\Controller;
 use App\Models\SocialPost;
+use App\Models\VideoFaceSwap;
 use App\Models\VideoProject;
 use App\Models\VideoShot;
 use App\Services\Billing\BillingEngine;
 use App\Services\Meta\MetaPublisher;
+use App\Services\Video\FaceSwapService;
 use App\Services\Video\VideoDirector;
 use App\Services\Video\VideoStudioService;
 use Illuminate\Http\Request;
@@ -141,6 +143,51 @@ class VideoStudioController extends Controller
         return response()->json($this->present($project));
     }
 
+    /**
+     * Swap a real person's face onto the film's actor. Their permission is
+     * mandatory and recorded (consented_at) — this is the one place a real
+     * face goes into a Pingly video.
+     */
+    public function faceSwap(Request $request, int $project, FaceSwapService $faceSwaps)
+    {
+        $project = $this->find($request, $project);
+        $data = $request->validate([
+            'face' => ['required', 'string'],
+            'target_face_index' => ['nullable', 'integer', 'min:0', 'max:5'],
+            'consent' => ['accepted'],
+        ], ['consent.accepted' => 'Confirm you have permission from the person whose face you are using.']);
+
+        @set_time_limit(300); // re-encoding the film to fit the service
+
+        try {
+            $swap = $faceSwaps->start($project, $request->user(), $data['face'], (int) ($data['target_face_index'] ?? 0));
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        if ($swap->status === 'failed') {
+            return response()->json(['message' => $swap->error], 422);
+        }
+
+        return response()->json($faceSwaps->present($swap), 201);
+    }
+
+    public function faceSwapMedia(Request $request, VideoFaceSwap $swap, string $kind)
+    {
+        $path = match ($kind) {
+            'face' => $swap->face_path,
+            'source' => $swap->source_path,
+            'result' => $swap->output_path,
+        };
+        abort_unless($path && Storage::disk('local')->exists($path), 404);
+
+        if ($kind === 'result' && $request->boolean('download')) {
+            return response()->download(Storage::disk('local')->path($path), 'pingly-face-swap-'.$swap->id.'.mp4');
+        }
+
+        return response()->file(Storage::disk('local')->path($path), ['Cache-Control' => 'private, max-age=3600']);
+    }
+
     /** A ready-to-post caption for this film, written by the AI (billed as AI usage). */
     public function caption(Request $request, int $project)
     {
@@ -169,10 +216,12 @@ class VideoStudioController extends Controller
             'platforms' => ['required', 'array', 'min:1'],
             'platforms.*' => ['distinct', Rule::in(MetaPublisher::PLATFORMS)],
             'caption' => ['nullable', 'string', 'max:2200'], // Instagram's caption limit
+            'face_swap_id' => ['nullable', 'integer'],
         ]);
+        $version = isset($data['face_swap_id']) ? $project->faceSwaps()->find($data['face_swap_id']) : null;
 
         try {
-            $posts = app(MetaPublisher::class)->publish($project, $data['platforms'], (string) ($data['caption'] ?? ''));
+            $posts = app(MetaPublisher::class)->publish($project, $data['platforms'], (string) ($data['caption'] ?? ''), $version);
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -282,7 +331,17 @@ class VideoStudioController extends Controller
         $planned = $board['shots'] ?? [];
         $names = collect($board['characters'] ?? [])->merge($board['products'] ?? [])->pluck('name', 'id');
 
+        $faceSwaps = app(FaceSwapService::class);
+        if ($project->isActive() === false) {
+            $project->faceSwaps()->where('status', 'processing')->get()->each(fn ($s) => dispatch(fn () => $faceSwaps->advance($s))->afterResponse());
+        }
+
         return $data + [
+            'face_swap' => [
+                'available' => $project->status === 'completed' && $faceSwaps->companyCanUse($project->company),
+                'quote' => $project->status === 'completed' ? $faceSwaps->quote($project) : null,
+                'swaps' => $project->faceSwaps()->get()->map(fn ($s) => $faceSwaps->present($s))->values(),
+            ],
             'publishing' => [
                 'targets' => $publisher->targets($project->company->metaConnection),
                 'posts' => SocialPost::where('video_project_id', $project->id)->latest('id')->get()->map(fn ($p) => $this->presentPost($p)),

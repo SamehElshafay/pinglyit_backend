@@ -21,9 +21,13 @@ class AiConnectionController extends Controller
     {
         $key = $this->ai->apiKey();
 
+        $faceKey = PlatformSetting::get('piapi_api_key');
+
         return response()->json([
             'configured' => filled($key),
             'preview' => $key ? '••••'.substr($key, -4) : null,
+            'faceswap_configured' => filled($faceKey),
+            'faceswap_preview' => $faceKey ? '••••'.substr($faceKey, -4) : null,
         ]);
     }
 
@@ -33,6 +37,17 @@ class AiConnectionController extends Controller
 
         PlatformSetting::set('openrouter_api_key', $data['openrouter_api_key']);
         AuditLog::record($request->user(), 'ai_connection.update', 'Updated the OpenRouter API key');
+
+        return $this->show();
+    }
+
+    /** PiAPI key for video face swap — same rules as the OpenRouter key. */
+    public function updateFaceSwap(Request $request)
+    {
+        $data = $request->validate(['piapi_api_key' => ['nullable', 'string', 'min:10']]);
+
+        PlatformSetting::set('piapi_api_key', $data['piapi_api_key'] ?? null);
+        AuditLog::record($request->user(), 'faceswap_connection.update', filled($data['piapi_api_key'] ?? null) ? 'Updated the PiAPI face swap key' : 'Removed the PiAPI face swap key');
 
         return $this->show();
     }

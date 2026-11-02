@@ -6,6 +6,7 @@ use App\Models\AiImage;
 use App\Models\Company;
 use App\Models\MetaConnection;
 use App\Models\SocialPost;
+use App\Models\VideoFaceSwap;
 use App\Models\VideoProject;
 use App\Services\Ai\AiGatewayService;
 use App\Services\Video\VideoDirector;
@@ -85,16 +86,21 @@ class MetaPublisher
      * @param  array<int, string>  $platforms
      * @return array<int, SocialPost>
      */
-    public function publish(VideoProject $project, array $platforms, string $caption): array
+    public function publish(VideoProject $project, array $platforms, string $caption, ?VideoFaceSwap $version = null): array
     {
         if ($project->status !== 'completed' || ! $project->output_path) {
             throw new RuntimeException('Only a finished video can be published.');
+        }
+        if ($version && ($version->video_project_id !== $project->id || $version->status !== 'completed')) {
+            throw new RuntimeException('That face-swapped version is not ready yet.');
         }
 
         // Long enough for Meta to fetch it even when its queue is slow.
         return $this->publishMedia($project->company, [
             'kind' => 'video',
-            'url' => URL::temporarySignedRoute('video.media', now()->addHours(12), ['project' => $project->id, 'kind' => 'film']),
+            'url' => $version
+                ? URL::temporarySignedRoute('faceswap.media', now()->addHours(12), ['swap' => $version->id, 'kind' => 'result'])
+                : URL::temporarySignedRoute('video.media', now()->addHours(12), ['project' => $project->id, 'kind' => 'film']),
             'title' => $project->title,
             'owner' => ['video_project_id' => $project->id],
         ], $platforms, $caption);

@@ -41,6 +41,11 @@ class VideoProject extends Model
         return $this->hasMany(VideoShot::class)->orderBy('position');
     }
 
+    public function faceSwaps(): HasMany
+    {
+        return $this->hasMany(VideoFaceSwap::class)->latest('id');
+    }
+
     public function isActive(): bool
     {
         return in_array($this->status, self::ACTIVE_STATUSES, true);

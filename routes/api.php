@@ -126,6 +126,14 @@ Route::get('/video-media/{project}/{kind}/{index?}', [VideoStudioController::cla
     ->whereNumber('index')
     ->name('video.media');
 
+// Face swap files: the face photo and source video PiAPI fetches, and the
+// swapped result the client watches. Signed like the rest of the media.
+Route::get('/face-swap-media/{swap}/{kind}', [VideoStudioController::class, 'faceSwapMedia'])
+    ->middleware('signed')
+    ->whereIn('kind', ['face', 'source', 'result'])
+    ->whereNumber('swap')
+    ->name('faceswap.media');
+
 Route::get('/image-media/{image}', [ImageStudioController::class, 'media'])->middleware('signed')->name('image.media');
 
 Route::middleware(['jwt', 'client'])->group(function () {
@@ -190,6 +198,7 @@ Route::middleware(['jwt', 'client'])->group(function () {
     Route::get('/services/video/projects/{project}', [VideoStudioController::class, 'show'])->whereNumber('project');
     Route::put('/services/video/projects/{project}/shots/{shot}', [VideoStudioController::class, 'updateShot'])->whereNumber(['project', 'shot']);
     Route::post('/services/video/projects/{project}/render', [VideoStudioController::class, 'render'])->whereNumber('project');
+    Route::post('/services/video/projects/{project}/face-swaps', [VideoStudioController::class, 'faceSwap'])->whereNumber('project');
     Route::delete('/services/video/projects/{project}', [VideoStudioController::class, 'destroy'])->whereNumber('project');
     Route::post('/services/video/projects/{project}/caption', [VideoStudioController::class, 'caption'])->whereNumber('project')->middleware('throttle:20,1');
     Route::post('/services/video/projects/{project}/publish', [VideoStudioController::class, 'publish'])->whereNumber('project')->middleware('throttle:10,1');
@@ -254,6 +263,7 @@ Route::prefix('admin')->group(function () {
         Route::get('/ai/connection', [AiConnectionController::class, 'show']);
         Route::put('/ai/connection', [AiConnectionController::class, 'update']);
         Route::delete('/ai/connection', [AiConnectionController::class, 'destroy']);
+        Route::put('/ai/connection/face-swap', [AiConnectionController::class, 'updateFaceSwap']);
 
         Route::get('/billing/reconciliation', [ReconciliationController::class, 'index']);
         Route::get('/wallet-adjustments', [WalletAdjustmentController::class, 'index']);

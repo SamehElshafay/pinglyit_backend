@@ -67,6 +67,21 @@ class VideoStitcher
         ], 60);
     }
 
+    /**
+     * A copy that fits a face-swap service: H.264 MP4, 24 fps, longest side
+     * ≤ 1280 (720p), at most $maxSeconds long, small enough to upload.
+     */
+    public function fitForFaceSwap(string $in, string $out, float $maxSeconds): void
+    {
+        $this->run([
+            config('pingly.video.ffmpeg'), '-y', '-i', $in, '-t', (string) $maxSeconds,
+            '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))',fps=24,format=yuv420p",
+            '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-maxrate', '4M', '-bufsize', '8M',
+            '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart',
+            $out,
+        ], 600);
+    }
+
     public function duration(string $videoPath): ?float
     {
         $result = Process::timeout(30)->run([

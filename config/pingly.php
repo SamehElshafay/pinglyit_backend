@@ -81,6 +81,8 @@ return [
 
         // Shots in flight at once per project.
         'parallel_shots' => (int) env('VIDEO_PARALLEL_SHOTS', 4),
+        // PiAPI video face swap (key set by an admin in the dashboard, not .env)
+        'faceswap_api_base' => env('FACESWAP_API_BASE', 'https://api.piapi.ai/api/v1'),
 
         // How often to resubmit a shot the provider failed, before giving up.
         'max_attempts' => (int) env('VIDEO_MAX_ATTEMPTS', 3),

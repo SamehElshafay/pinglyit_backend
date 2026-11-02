@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Video\FaceSwapService;
 use App\Services\Video\VideoStudioService;
 use Illuminate\Console\Command;
 
@@ -18,10 +19,11 @@ class AdvanceVideoProjects extends Command
 
     protected $description = 'Advance in-flight Video Studio renders';
 
-    public function handle(VideoStudioService $studio): int
+    public function handle(VideoStudioService $studio, FaceSwapService $faceSwaps): int
     {
         $count = $studio->advanceAll();
-        $this->info("Advanced {$count} video project(s).");
+        $swaps = $faceSwaps->advanceAll();
+        $this->info("Advanced {$count} video project(s) and {$swaps} face swap(s).");
 
         return self::SUCCESS;
     }
