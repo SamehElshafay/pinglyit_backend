@@ -126,6 +126,8 @@ class VideoStudioService
                     'audio' => $m['audio'],
                     'max_references' => $m['max_references'],
                     'blocks_real_faces' => $m['blocks_real_faces'] ?? false,
+                    'keyframes' => in_array('first', $m['frames'] ?? [], true),
+                    'keyframes_forced' => ($m['conditioning'] ?? null) === 'keyframe',
                     'max_shot_seconds' => max($m['durations']),
                     'price_per_second' => $prices,
                 ];
@@ -181,7 +183,12 @@ class VideoStudioService
         }
 
         $audio = (bool) $input['generate_audio'] && $model['audio'];
-        $durations = $this->catalog->planShotDurations($input['model'], (int) $input['duration']);
+        // Pro mode: short shots, each animated from a painted, product-accurate
+        // first frame (and the last one landing on a painted hero frame).
+        // Kling has no other way in, so it's always on there.
+        $keyframes = ($model['conditioning'] ?? null) === 'keyframe'
+            || (! empty($input['keyframes']) && $this->catalog->supportsKeyframes($input['model']));
+        $durations = $this->catalog->planShotDurations($input['model'], (int) $input['duration'], ! empty($input['keyframes']) && $keyframes ? 5 : null);
 
         // Store the references before the (slow) LLM call so a failure
         // further down doesn't leave orphaned files with no project row —
@@ -197,6 +204,7 @@ class VideoStudioService
             'generate_audio' => $audio,
             'language' => $audio ? ($input['language'] ?? null) : null,
             'style' => $input['style'] ?? 'cinematic',
+            'keyframes' => $keyframes,
             'status' => 'draft',
         ]);
 
@@ -205,7 +213,7 @@ class VideoStudioService
 
             $storyboard = $this->director->plan(
                 $company, $input['prompt'], $durations, $project->references ?? [],
-                $project->language, $project->style, $project->aspect_ratio,
+                $project->language, $project->style, $project->aspect_ratio, $keyframes,
             );
         } catch (Throwable $e) {
             $this->deleteProject($project);
@@ -222,13 +230,16 @@ class VideoStudioService
         $multiplier = $this->multiplierFor($company, $project->model);
         $refCount = count($project->references ?? []);
 
-        DB::transaction(function () use ($project, $storyboard, $multiplier, $refCount) {
+        DB::transaction(function () use ($project, $storyboard, $multiplier, $refCount, $keyframes) {
             $total = 0.0;
+            $last = count($storyboard['shots']) - 1;
             foreach ($storyboard['shots'] as $i => $shot) {
+                $painted = ! $keyframes ? 0 : 1 + ($i === $last && $this->catalog->supportsEndFrame($project->model) && ! empty($shot['end_frame']) ? 1 : 0);
                 $quote = round($this->catalog->estimateShotCost(
                     $project->model, $project->resolution, $project->aspect_ratio, $shot['duration'], $project->generate_audio,
                     // the first shot's still becomes an extra reference for the rest when none were uploaded
                     $refCount ?: ($i > 0 ? 1 : 0),
+                    $painted,
                 ) * $multiplier, 4);
                 $total += $quote;
 
@@ -258,7 +269,7 @@ class VideoStudioService
         }
 
         // A painted opening frame belongs to the old description.
-        $shot->update(['description' => $description, 'keyframe_path' => null, 'keyframe_cost' => null]);
+        $shot->update(['description' => $description, 'keyframe_path' => null, 'end_frame_path' => null, 'keyframe_cost' => null]);
 
         return $shot;
     }
@@ -439,14 +450,20 @@ class VideoStudioService
         if ($this->usesKeyframes($project)) {
             try {
                 $frame = $this->keyframeFor($project, $shot, $planned);
+                $end = $this->endFrameFor($project, $shot, $planned, $frame);
             } catch (RuntimeException $e) {
                 $shot->update(['status' => 'failed', 'error' => $e->getMessage()]);
-                $this->fail($project, 'Shot '.($shot->position + 1)."'s opening frame couldn't be painted — {$e->getMessage()} Edit the shot and resume.");
+                $this->fail($project, 'Shot '.($shot->position + 1)."'s key frame couldn't be painted — {$e->getMessage()} Edit the shot and resume.");
 
                 return;
             }
             $prompt = $this->director->composePrompt($storyboard, $planned, $shot->position, $project->shots()->count(), 0, false)
-                ."\nStart exactly from the given first frame: same people, faces, clothes, products and setting; animate it as described.";
+                ."\nStart exactly from the given first frame: same people, faces, clothes, products, prints and setting; animate it as described with smooth, physically believable motion."
+                .($end ? "\nEnd exactly on the given last frame — every product settled precisely as shown there." : '');
+            $frames = [['type' => 'image_url', 'image_url' => ['url' => $this->dataUrl($frame)], 'frame_type' => 'first_frame']];
+            if ($end) {
+                $frames[] = ['type' => 'image_url', 'image_url' => ['url' => $this->dataUrl($end)], 'frame_type' => 'last_frame'];
+            }
             $body = [
                 'model' => $project->model,
                 'prompt' => $prompt,
@@ -454,7 +471,7 @@ class VideoStudioService
                 'resolution' => $project->resolution,
                 'aspect_ratio' => $project->aspect_ratio,
                 'generate_audio' => $project->generate_audio,
-                'frame_images' => [['type' => 'image_url', 'image_url' => ['url' => $this->dataUrl($frame)], 'frame_type' => 'first_frame']],
+                'frame_images' => $frames,
             ];
         } else {
             $images = collect($references)->map(fn ($r) => $this->dataUrl($r['path']));
@@ -508,36 +525,13 @@ class VideoStudioService
             return $shot->keyframe_path;
         }
 
-        $refs = collect($project->references ?? [])->values();
-        $images = $refs->map(fn ($r) => $this->dataUrl($r['path']))->all();
-        $fromFirstShot = false;
-        if (! $images && $shot->position > 0) {
-            $first = $project->shots()->where('position', 0)->value('keyframe_path');
-            if ($first && Storage::disk('local')->exists($first)) {
-                $images[] = $this->dataUrl($first);
-                $fromFirstShot = true;
-            }
-        }
+        // Shot 1's frame is the continuity anchor for every later frame:
+        // same actor, wardrobe, light and location across the cuts.
+        $anchor = $shot->position > 0 ? $project->shots()->where('position', 0)->value('keyframe_path') : null;
+        $anchor = $anchor && Storage::disk('local')->exists($anchor) ? $anchor : null;
 
-        $board = $project->storyboard ?? [];
-        $lines = ["Paint the opening frame of one shot of a professional ad film, as a single photorealistic film still (aspect ratio {$project->aspect_ratio})."];
-        if (! empty($board['style_bible'])) {
-            $lines[] = 'Look of the film: '.(is_string($board['style_bible']) ? $board['style_bible'] : json_encode($board['style_bible'], JSON_UNESCAPED_UNICODE));
-        }
-        $lines[] = 'This shot: '.$planned['description'];
-        if ($refs->isNotEmpty()) {
-            $lines[] = "The attached images are the client's real references:";
-            foreach ($refs as $i => $r) {
-                $lines[] = 'Image '.($i + 1).": {$r['role']} — {$r['label']}";
-            }
-            $lines[] = 'Keep every person exactly the same person — same face, features, skin tone and hair — and every product exactly as it is.';
-        } elseif ($fromFirstShot) {
-            $lines[] = 'The attached image is the first shot of this film — keep the same people, wardrobe and look.';
-        }
-        $lines[] = 'No text, captions or watermarks.';
-
-        $aspect = in_array($project->aspect_ratio, ['16:9', '9:16', '1:1'], true) ? $project->aspect_ratio : '16:9';
-        $rendered = app(ImageStudioService::class)->render(VideoModelCatalog::KEYFRAME_IMAGE_MODEL, implode("\n", $lines), $images, $aspect);
+        $what = 'the OPENING frame of shot '.($shot->position + 1).' of '.$project->shots()->count();
+        $rendered = $this->paint($project, $what, $planned['first_frame'] ?? $planned['description'], $planned, $anchor ? [$anchor => 'the first shot of this film — keep the same people, wardrobe, light and location'] : []);
 
         $path = $project->storageDir().sprintf('/keyframe_%03d.%s', $shot->position, $rendered['ext']);
         Storage::disk('local')->put($path, $rendered['bytes']);
@@ -546,9 +540,85 @@ class VideoStudioService
         return $path;
     }
 
+    /**
+     * The film's final shot lands on a painted hero frame — the product
+     * layout the whole ad builds to, drawn as a still where prints and
+     * logos come out right, instead of left to the video model's last
+     * second of motion.
+     *
+     * @param  array<string, mixed>  $planned
+     */
+    private function endFrameFor(VideoProject $project, VideoShot $shot, array $planned, string $firstFrame): ?string
+    {
+        $isLast = $shot->position === $project->shots()->max('position');
+        if (! $isLast || empty($planned['end_frame']) || ! $this->catalog->supportsEndFrame($project->model)) {
+            return null;
+        }
+        if ($shot->end_frame_path && Storage::disk('local')->exists($shot->end_frame_path)) {
+            return $shot->end_frame_path;
+        }
+
+        $rendered = $this->paint($project, 'the FINAL frame of the film (the hero shot it ends on)', $planned['end_frame'], $planned, [
+            $firstFrame => 'the opening frame of this same shot — same location, light and camera',
+        ]);
+
+        $path = $project->storageDir().sprintf('/endframe_%03d.%s', $shot->position, $rendered['ext']);
+        Storage::disk('local')->put($path, $rendered['bytes']);
+        $shot->update(['end_frame_path' => $path, 'keyframe_cost' => (float) $shot->keyframe_cost + $rendered['cost']]);
+
+        return $path;
+    }
+
+    /**
+     * One painted still: the client's photos first (they're the truth for
+     * every product and person), then any continuity frames.
+     *
+     * @param  array<string, mixed>  $planned
+     * @param  array<string, string>  $extra  path => what it is
+     * @return array{bytes: string, ext: string, cost: float, tokens: int}
+     */
+    private function paint(VideoProject $project, string $what, string $frame, array $planned, array $extra): array
+    {
+        $board = $project->storyboard ?? [];
+        $refs = collect($project->references ?? [])->values();
+        $images = $refs->map(fn ($r) => $this->dataUrl($r['path']))->all();
+
+        $lines = ["Paint {$what} of a premium advertising film, as one photorealistic cinematic still, aspect ratio {$project->aspect_ratio}."];
+        if (! empty($board['style_bible'])) {
+            $lines[] = 'Look of the film: '.(is_string($board['style_bible']) ? $board['style_bible'] : json_encode($board['style_bible'], JSON_UNESCAPED_UNICODE));
+        }
+        $lines[] = 'The frame: '.$frame;
+
+        $byId = collect($board['characters'] ?? [])->merge($board['products'] ?? [])->keyBy('id');
+        foreach ([...($planned['characters'] ?? []), ...($planned['products'] ?? [])] as $id) {
+            if ($e = $byId->get($id)) {
+                $lines[] = strtoupper($e['kind']).' '.$e['name'].' ('.$id.'): '.$e['description'].(! empty($e['reference']) ? ' — this is image '.$e['reference'].'.' : '');
+            }
+        }
+
+        if ($refs->isNotEmpty()) {
+            $lines[] = "Images 1–{$refs->count()} are the client's real photos:";
+            foreach ($refs as $i => $r) {
+                $lines[] = 'Image '.($i + 1).": {$r['role']} — {$r['label']}";
+            }
+            $lines[] = 'Reproduce every product EXACTLY as photographed — the same colour, cut, fabric, and every print, illustration, text and logo, at the same size and position. This matters more than anything else in the frame. '
+                .'Keep every person the same person: face, features, skin tone, hair. If a product photo shows a model wearing it, use only the garment.';
+        }
+        $n = $refs->count();
+        foreach ($extra as $path => $label) {
+            $images[] = $this->dataUrl($path);
+            $lines[] = 'Image '.(++$n).": {$label}.";
+        }
+        $lines[] = 'Leave clean space — no text, captions, watermarks or added logos.';
+
+        $aspect = in_array($project->aspect_ratio, ['16:9', '9:16', '1:1'], true) ? $project->aspect_ratio : '16:9';
+
+        return app(ImageStudioService::class)->render(VideoModelCatalog::KEYFRAME_IMAGE_MODEL, implode("\n", $lines), $images, $aspect);
+    }
+
     private function usesKeyframes(VideoProject $project): bool
     {
-        return ($this->catalog->get($project->model)['conditioning'] ?? null) === 'keyframe';
+        return $project->keyframes || ($this->catalog->get($project->model)['conditioning'] ?? null) === 'keyframe';
     }
 
     /** @param  array<string, mixed>  $body */

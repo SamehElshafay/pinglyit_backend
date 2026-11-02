@@ -63,6 +63,7 @@ class VideoStudioController extends Controller
             'aspect_ratio' => ['required', 'string'],
             'duration' => ['required', 'integer', 'min:4', 'max:'.config('pingly.video.max_duration')],
             'generate_audio' => ['boolean'],
+            'keyframes' => ['boolean'],
             'language' => ['nullable', Rule::in(array_keys(VideoDirector::LANGUAGES))],
             'style' => ['nullable', Rule::in(array_keys(VideoDirector::STYLES))],
             'references' => ['array', 'max:9'],
@@ -205,6 +206,8 @@ class VideoStudioController extends Controller
             'poster' => $project->thumbnail_path,
             'shot' => $project->shots()->where('position', $index)->value('file_path'),
             'reference' => $project->references[$index]['path'] ?? null,
+            'keyframe' => $project->shots()->where('position', $index)->value('keyframe_path'),
+            'endframe' => $project->shots()->where('position', $index)->value('end_frame_path'),
             default => null,
         };
 
@@ -259,6 +262,7 @@ class VideoStudioController extends Controller
             'language' => $project->language,
             'style' => $project->style,
             'generate_audio' => $project->generate_audio,
+            'keyframes' => $project->keyframes,
             'estimated_cost' => (float) $project->estimated_cost,
             'remaining_cost' => (float) $shots->where('status', '!=', 'completed')->sum('quoted_amount'),
             'billed_total' => (float) $project->billed_total,
@@ -305,6 +309,8 @@ class VideoStudioController extends Controller
                 'voiceover' => $planned[$s->position]['voiceover'] ?? null,
                 'sound' => $planned[$s->position]['sound'] ?? null,
                 'video_url' => $s->file_path ? $url('shot', $s->position) : null,
+                'keyframe_url' => $s->keyframe_path ? $url('keyframe', $s->position) : null,
+                'end_frame_url' => $s->end_frame_path ? $url('endframe', $s->position) : null,
             ])->values(),
         ];
     }

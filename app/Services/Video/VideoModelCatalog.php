@@ -29,6 +29,7 @@ class VideoModelCatalog
     /** @var array<string, array<string, mixed>> */
     private const MODELS = [
         'bytedance/seedance-2.0' => [
+            'frames' => ['first', 'last'],
             'name' => 'Seedance 2.0',
             'tagline' => 'Best all-round — strongest face & product consistency, native audio',
             'durations' => [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -42,6 +43,7 @@ class VideoModelCatalog
             'blocks_real_faces' => true,
         ],
         'bytedance/seedance-2.5' => [
+            'frames' => ['first', 'last'],
             'name' => 'Seedance 2.5',
             'tagline' => 'Long takes up to 30s per shot — built for storytelling',
             'durations' => [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
@@ -54,6 +56,7 @@ class VideoModelCatalog
             'blocks_real_faces' => true,
         ],
         'google/veo-3.1' => [
+            'frames' => ['first', 'last'],
             'name' => 'Veo 3.1',
             'tagline' => 'Premium realism and lip-synced dialogue — highest cost',
             'durations' => [4, 6, 8],
@@ -65,6 +68,7 @@ class VideoModelCatalog
             'fallback_per_second' => 0.40,
         ],
         'alibaba/wan-3.0' => [
+            'frames' => ['first', 'last'],
             'name' => 'Wan 3.0',
             'tagline' => 'Budget 1080p with audio — good for drafts and social cuts',
             'durations' => [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30],
@@ -76,6 +80,7 @@ class VideoModelCatalog
             'fallback_per_second' => 0.20,
         ],
         'bytedance/seedance-2.0-fast' => [
+            'frames' => ['first', 'last'],
             'name' => 'Seedance 2.0 Fast',
             'tagline' => 'Quick, cheap previews of a storyboard before the final render',
             'durations' => [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -88,6 +93,7 @@ class VideoModelCatalog
             'blocks_real_faces' => true,
         ],
         'bytedance/seedance-2.0-mini' => [
+            'frames' => ['first', 'last'],
             'name' => 'Seedance 2.0 Mini',
             'tagline' => 'The cheapest Seedance — same consistency, for small budgets',
             'durations' => [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -104,6 +110,7 @@ class VideoModelCatalog
         // (from the client's photos) — which is also what lets a real
         // person's face through: Seedance refuses those.
         'kwaivgi/kling-v3.0-pro' => [
+            'frames' => ['first', 'last'],
             'name' => 'Kling 3.0 Pro',
             'tagline' => 'Real people — keeps the face from your photo in every shot',
             'durations' => [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -116,6 +123,7 @@ class VideoModelCatalog
             'conditioning' => 'keyframe',
         ],
         'alibaba/happyhorse-1.1' => [
+            'frames' => ['first'],
             'name' => 'HappyHorse 1.1',
             'tagline' => 'Sharp 1080p from several reference images — good value, no audio',
             'durations' => [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -150,6 +158,17 @@ class VideoModelCatalog
     public function __construct(private readonly AiGatewayService $ai) {}
 
     /** @return array<string, array<string, mixed>> */
+    /** Pro mode — animating painted keyframes — needs at least first-frame control. */
+    public function supportsKeyframes(string $modelId): bool
+    {
+        return in_array('first', $this->get($modelId)['frames'] ?? [], true);
+    }
+
+    public function supportsEndFrame(string $modelId): bool
+    {
+        return in_array('last', $this->get($modelId)['frames'] ?? [], true);
+    }
+
     public function all(): array
     {
         return self::MODELS;
@@ -178,17 +197,20 @@ class VideoModelCatalog
      *
      * @return array<int, int>
      */
-    public function planShotDurations(string $modelId, int $target): array
+    public function planShotDurations(string $modelId, int $target, ?int $shotLength = null): array
     {
         $model = $this->get($modelId);
         $allowed = $model['durations'];
+        // Pro mode asks for short shots even when one long one would fit.
+        $short = $shotLength !== null;
+        $shotLength ??= $model['shot_length'];
         $max = max($allowed);
 
-        if ($target <= $max) {
+        if ($target <= $max && (! $short || $target <= $shotLength * 1.5)) {
             return [$this->snap($target, $allowed)];
         }
 
-        $count = (int) ceil($target / $model['shot_length']);
+        $count = (int) ceil($target / $shotLength);
         $base = intdiv($target, $count);
         $extra = $target % $count;
 
@@ -211,7 +233,7 @@ class VideoModelCatalog
      * quote shown before rendering, not what's billed (that comes from the
      * provider's own usage.cost once the shot is done).
      */
-    public function estimateShotCost(string $modelId, string $resolution, string $aspectRatio, int $seconds, bool $audio, int $referenceCount): float
+    public function estimateShotCost(string $modelId, string $resolution, string $aspectRatio, int $seconds, bool $audio, int $referenceCount, int $paintedFrames = 0): float
     {
         $skus = $this->pricingSkus($modelId);
         $perSecond = $skus ? $this->perSecond($skus, $resolution, $aspectRatio, $audio) : null;
@@ -227,8 +249,9 @@ class VideoModelCatalog
             $referenceFee = (float) $skus['cents_per_image_input'] / 100;
         }
 
-        if (($this->get($modelId)['conditioning'] ?? null) === 'keyframe') {
-            return round($perSecond * $seconds + self::KEYFRAME_ESTIMATE, 6);
+        if ($paintedFrames > 0) {
+            // Frame-conditioned: the reference photos go to the image model, not the video model.
+            return round($perSecond * $seconds + self::KEYFRAME_ESTIMATE * $paintedFrames, 6);
         }
 
         return round($perSecond * $seconds + $referenceFee * $referenceCount, 6);

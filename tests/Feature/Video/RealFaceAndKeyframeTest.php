@@ -117,7 +117,7 @@ class RealFaceAndKeyframeTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/chat/completions') && isset($r['modalities'])
             && $r['model'] === 'google/gemini-3-pro-image' && $r['image_config']['aspect_ratio'] === '9:16'
             && $r['messages'][0]['content'][1]['type'] === 'image_url'
-            && str_contains($r['messages'][0]['content'][0]['text'], 'same face'));
+            && str_contains($r['messages'][0]['content'][0]['text'], 'the same person: face'));
         // …then Kling animated it: a first frame, no reference images.
         Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/videos')
             && $r['model'] === 'kwaivgi/kling-v3.0-pro'

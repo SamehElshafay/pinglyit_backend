@@ -122,7 +122,7 @@ Route::middleware('throttle:10,1')->group(function () {
 // tag can't send an Authorization header. See VideoStudioController::media().
 Route::get('/video-media/{project}/{kind}/{index?}', [VideoStudioController::class, 'media'])
     ->middleware('signed')
-    ->whereIn('kind', ['film', 'poster', 'shot', 'reference'])
+    ->whereIn('kind', ['film', 'poster', 'shot', 'reference', 'keyframe', 'endframe'])
     ->whereNumber('index')
     ->name('video.media');
 

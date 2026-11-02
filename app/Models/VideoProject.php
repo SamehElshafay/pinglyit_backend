@@ -12,7 +12,7 @@ class VideoProject extends Model
 
     protected $fillable = [
         'company_id', 'user_id', 'title', 'prompt', 'model', 'resolution', 'aspect_ratio',
-        'target_duration', 'generate_audio', 'language', 'style', 'references', 'anchor_path',
+        'target_duration', 'generate_audio', 'language', 'style', 'keyframes', 'references', 'anchor_path',
         'storyboard', 'status', 'estimated_cost', 'billed_total', 'error', 'output_path',
         'thumbnail_path', 'output_duration', 'started_at', 'completed_at',
     ];
@@ -20,6 +20,7 @@ class VideoProject extends Model
     protected function casts(): array
     {
         return [
+            'keyframes' => 'boolean',
             'generate_audio' => 'boolean',
             'references' => 'array',
             'storyboard' => 'array',

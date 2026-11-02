@@ -51,7 +51,7 @@ class VideoDirector
      * @param  array<int, array{label: string, role: string}>  $references  in the order they'll be sent to the model
      * @return array<string, mixed> the storyboard
      */
-    public function plan(Company $company, string $brief, array $durations, array $references, ?string $language, ?string $style, string $aspectRatio): array
+    public function plan(Company $company, string $brief, array $durations, array $references, ?string $language, ?string $style, string $aspectRatio, bool $keyframes = false): array
     {
         $shotLines = collect($durations)->map(fn ($d, $i) => '  shot '.($i + 1).": {$d} seconds")->implode("\n");
 
@@ -77,6 +77,7 @@ class VideoDirector
 
         {$languageLine}
         {$styleLine}
+        {$this->keyframeRules($keyframes)}
         TXT;
 
         // The director must SEE the photos: from file names alone it invents
@@ -146,6 +147,26 @@ class VideoDirector
             .'Photorealistic anatomy, natural motion, no morphing. No on-screen text, captions, subtitles, logos added by you, or watermarks.';
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * Pro mode: every shot is animated from a painted still, so the plan
+     * has to say what that still looks like — and the film ends on a
+     * painted hero frame where the products are laid out perfectly.
+     */
+    private function keyframeRules(bool $keyframes): string
+    {
+        if (! $keyframes) {
+            return '';
+        }
+
+        return <<<TXT
+        PRO MODE — every shot is animated from a painted first frame:
+        - For EVERY shot add "first_frame": 40-80 words describing the exact still the shot opens on — composition, camera angle, where each person and product is, light. It must be a frozen moment that can be painted as a photo, not an action.
+        - For the LAST shot ALSO add "end_frame": 40-80 words describing the still the film ends on — the hero product layout, perfectly arranged, prints facing the camera.
+        - Keep each shot to ONE simple, continuous motion (short shots, ~4-5 s). Cut between shots instead of cramming several actions into one: a cut is free, a crammed shot breaks.
+        - Garments and printed products move gently (drift, turn, settle) — violent motion makes the video model redraw the print.
+        TXT;
     }
 
     private function systemPrompt(): string
@@ -248,6 +269,8 @@ class VideoDirector
                     ->values()->all(),
                 'voiceover' => filled($s['voiceover'] ?? null) ? (string) $s['voiceover'] : null,
                 'sound' => (string) ($s['sound'] ?? ''),
+                'first_frame' => filled($s['first_frame'] ?? null) ? (string) $s['first_frame'] : null,
+                'end_frame' => filled($s['end_frame'] ?? null) && $i === count($durations) - 1 ? (string) $s['end_frame'] : null,
             ];
         }
 
