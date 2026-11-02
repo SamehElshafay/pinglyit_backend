@@ -10,7 +10,7 @@ class VideoShot extends Model
     protected $fillable = [
         'video_project_id', 'position', 'duration', 'description', 'rendered_prompt', 'status',
         'provider_job_id', 'attempts', 'submitted_at', 'last_polled_at', 'quoted_amount', 'raw_cost',
-        'billed_amount', 'usage_event_id', 'file_path', 'error',
+        'billed_amount', 'usage_event_id', 'file_path', 'keyframe_path', 'keyframe_cost', 'error',
     ];
 
     protected function casts(): array

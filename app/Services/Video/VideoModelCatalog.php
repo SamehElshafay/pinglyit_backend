@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\Log;
  * different man every cut — and that's the one failure a brand film can't
  * survive, so those models aren't offered at all.
  *
- * Checked against GET /api/v1/videos/models on 2026-11-01.
+ * Checked against GET /api/v1/videos/models on 2026-11-02 (31 models listed;
+ * edit/upscale tools and text-only models left out).
  * `fallback_per_second` is only used if that live price lookup fails, so an
  * estimate is never $0; the client is always billed from what OpenRouter
  * reports it actually charged (see VideoStudioService::billShot()).
@@ -38,6 +39,7 @@ class VideoModelCatalog
             'max_references' => 9,
             'fallback_per_second' => 0.37,
             'recommended' => true,
+            'blocks_real_faces' => true,
         ],
         'bytedance/seedance-2.5' => [
             'name' => 'Seedance 2.5',
@@ -49,6 +51,7 @@ class VideoModelCatalog
             'audio' => true,
             'max_references' => 9,
             'fallback_per_second' => 0.24,
+            'blocks_real_faces' => true,
         ],
         'google/veo-3.1' => [
             'name' => 'Veo 3.1',
@@ -82,8 +85,57 @@ class VideoModelCatalog
             'audio' => true,
             'max_references' => 9,
             'fallback_per_second' => 0.10,
+            'blocks_real_faces' => true,
+        ],
+        'bytedance/seedance-2.0-mini' => [
+            'name' => 'Seedance 2.0 Mini',
+            'tagline' => 'The cheapest Seedance — same consistency, for small budgets',
+            'durations' => [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            'shot_length' => 8,
+            'resolutions' => ['480p', '720p'],
+            'aspect_ratios' => ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+            'audio' => true,
+            'max_references' => 9,
+            'fallback_per_second' => 0.08,
+            'blocks_real_faces' => true,
+        ],
+        // Kling takes no reference images, only a first frame. So each shot
+        // starts from a keyframe that Pingly first paints with an image model
+        // (from the client's photos) — which is also what lets a real
+        // person's face through: Seedance refuses those.
+        'kwaivgi/kling-v3.0-pro' => [
+            'name' => 'Kling 3.0 Pro',
+            'tagline' => 'Real people — keeps the face from your photo in every shot',
+            'durations' => [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            'shot_length' => 8,
+            'resolutions' => ['720p'],
+            'aspect_ratios' => ['16:9', '9:16', '1:1'],
+            'audio' => true,
+            'max_references' => 4,
+            'fallback_per_second' => 0.168,
+            'conditioning' => 'keyframe',
+        ],
+        'alibaba/happyhorse-1.1' => [
+            'name' => 'HappyHorse 1.1',
+            'tagline' => 'Sharp 1080p from several reference images — good value, no audio',
+            'durations' => [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            'shot_length' => 8,
+            'resolutions' => ['720p', '1080p'],
+            'aspect_ratios' => ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+            'audio' => false,
+            'max_references' => 4,
+            'fallback_per_second' => 0.13,
         ],
     ];
+
+    /** Where a real person's photo goes when the chosen model refuses real faces. */
+    public const REAL_FACE_MODEL = 'kwaivgi/kling-v3.0-pro';
+
+    /** Paints each shot's first frame for keyframe-conditioned models. */
+    public const KEYFRAME_IMAGE_MODEL = 'google/gemini-3-pro-image';
+
+    /** What one keyframe image costs, for the quote (~$0.13 measured on Gemini 3 Pro Image). */
+    public const KEYFRAME_ESTIMATE = 0.14;
 
     /** Pixel sizes per aspect ratio + resolution — what a token-priced model bills on. */
     private const SIZES = [
@@ -173,6 +225,10 @@ class VideoModelCatalog
         }
         if (isset($skus['cents_per_image_input'])) {
             $referenceFee = (float) $skus['cents_per_image_input'] / 100;
+        }
+
+        if (($this->get($modelId)['conditioning'] ?? null) === 'keyframe') {
+            return round($perSecond * $seconds + self::KEYFRAME_ESTIMATE, 6);
         }
 
         return round($perSecond * $seconds + $referenceFee * $referenceCount, 6);

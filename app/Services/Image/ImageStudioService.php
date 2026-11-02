@@ -50,7 +50,32 @@ class ImageStudioService
             throw new RuntimeException('Wallet balance is too low — top up to create images.');
         }
 
-        $content = [['type' => 'text', 'text' => $this->instruction($prompt, $aspectRatio, count($references))]];
+        $rendered = $this->render($model, $this->instruction($prompt, $aspectRatio, count($references)), $references, $aspectRatio);
+        $cost = $rendered['cost'];
+        $this->ai->recordCompletion($company, $model, $rendered['tokens'], $cost);
+        $billed = round($cost * $this->ai->multiplierFor($company, $model), 6);
+
+        $image = AiImage::create([
+            'company_id' => $company->id, 'prompt' => $prompt, 'model' => $model,
+            'aspect_ratio' => $aspectRatio, 'billed_amount' => $billed,
+        ]);
+        $path = "images/{$company->id}/{$image->id}.{$rendered['ext']}";
+        Storage::disk('local')->put($path, $rendered['bytes']);
+        $image->update(['path' => $path]);
+
+        return $image;
+    }
+
+    /**
+     * One image-model call, unbilled — the caller decides who pays.
+     * Also used by Video Studio to paint keyframes for Kling.
+     *
+     * @param  array<int, string>  $references  data: URLs
+     * @return array{bytes: string, ext: string, cost: float, tokens: int}
+     */
+    public function render(string $model, string $instruction, array $references, string $aspectRatio): array
+    {
+        $content = [['type' => 'text', 'text' => $instruction]];
         foreach ($references as $url) {
             $content[] = ['type' => 'image_url', 'image_url' => ['url' => $url]];
         }
@@ -83,19 +108,12 @@ class ImageStudioService
             throw new RuntimeException('The model didn\'t produce an image for this prompt — it may have been declined. Try rephrasing.');
         }
 
-        $cost = (float) $response->json('usage.cost', 0);
-        $this->ai->recordCompletion($company, $model, (int) $response->json('usage.total_tokens', 0), $cost);
-        $billed = round($cost * $this->ai->multiplierFor($company, $model), 6);
-
-        $image = AiImage::create([
-            'company_id' => $company->id, 'prompt' => $prompt, 'model' => $model,
-            'aspect_ratio' => $aspectRatio, 'billed_amount' => $billed,
-        ]);
-        $path = "images/{$company->id}/{$image->id}.".($m[1] === 'jpeg' ? 'jpg' : $m[1]);
-        Storage::disk('local')->put($path, base64_decode($m[2]));
-        $image->update(['path' => $path]);
-
-        return $image;
+        return [
+            'bytes' => base64_decode($m[2]),
+            'ext' => $m[1] === 'jpeg' ? 'jpg' : $m[1],
+            'cost' => (float) $response->json('usage.cost', 0),
+            'tokens' => (int) $response->json('usage.total_tokens', 0),
+        ];
     }
 
     public function delete(AiImage $image): void

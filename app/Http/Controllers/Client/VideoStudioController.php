@@ -69,7 +69,13 @@ class VideoStudioController extends Controller
             'references.*.data' => ['required', 'string'],
             'references.*.label' => ['required', 'string', 'max:60'],
             'references.*.role' => ['required', Rule::in(['character', 'product', 'logo', 'location', 'style'])],
-        ]);
+            'references.*.real_person' => ['boolean'],
+            // A real person's face is only used with their permission.
+            'real_person_consent' => Rule::when(
+                collect($request->input('references', []))->contains(fn ($r) => ! empty($r['real_person'])),
+                ['accepted'],
+            ),
+        ], ['real_person_consent.accepted' => 'Confirm you have permission from the person in the photo.']);
 
         // Planning is one LLM round trip that can take ~30s on a long film.
         @set_time_limit(180);
@@ -243,6 +249,7 @@ class VideoStudioController extends Controller
             'prompt' => $project->prompt,
             'status' => $project->status,
             'error' => $project->error,
+            'notice' => $board['notice'] ?? null,
             'model' => $project->model,
             'resolution' => $project->resolution,
             'aspect_ratio' => $project->aspect_ratio,
@@ -281,7 +288,7 @@ class VideoStudioController extends Controller
             'characters' => $board['characters'] ?? [],
             'products' => $board['products'] ?? [],
             'references' => collect($project->references ?? [])->map(fn ($r, $i) => [
-                'label' => $r['label'], 'role' => $r['role'], 'url' => $url('reference', $i),
+                'label' => $r['label'], 'role' => $r['role'], 'real_person' => $r['real_person'] ?? false, 'url' => $url('reference', $i),
             ])->values(),
             'shots' => $shots->map(fn (VideoShot $s) => [
                 'id' => $s->id,

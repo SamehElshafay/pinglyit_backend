@@ -10,6 +10,7 @@ use App\Models\VideoShot;
 use App\Services\Ai\AiGatewayService;
 use App\Services\Billing\BillingEngine;
 use App\Services\Billing\ServiceConfigRepository;
+use App\Services\Image\ImageStudioService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
@@ -124,6 +125,7 @@ class VideoStudioService
                     'aspect_ratios' => $m['aspect_ratios'],
                     'audio' => $m['audio'],
                     'max_references' => $m['max_references'],
+                    'blocks_real_faces' => $m['blocks_real_faces'] ?? false,
                     'max_shot_seconds' => max($m['durations']),
                     'price_per_second' => $prices,
                 ];
@@ -140,9 +142,34 @@ class VideoStudioService
     {
         $this->assertUsable($company);
 
+        $disabled = $this->pricingFor($company)['disabled_models'] ?? [];
         $model = $this->catalog->get($input['model']);
-        if (! $model || in_array($input['model'], $this->pricingFor($company)['disabled_models'] ?? [], true)) {
+        if (! $model || in_array($input['model'], $disabled, true)) {
             throw new RuntimeException('That video model is not available.');
+        }
+
+        // Seedance refuses photos of real people (ByteDance's deepfake
+        // rule). Rather than fail at render time, a film with a real
+        // person's photo goes to the model that can take one — the quote
+        // the client approves is already the new model's price.
+        $notice = null;
+        $realPerson = collect($references)->contains(fn ($r) => ! empty($r['real_person']));
+        if ($realPerson && ($model['blocks_real_faces'] ?? false)) {
+            $alt = VideoModelCatalog::REAL_FACE_MODEL;
+            if (in_array($alt, $disabled, true)) {
+                throw new RuntimeException("{$model['name']} can't use photos of real people. Remove the photo, or ask support to enable Kling 3.0 Pro.");
+            }
+            $altModel = $this->catalog->get($alt);
+            $notice = "{$model['name']} doesn't accept photos of real people, so this film uses {$altModel['name']} instead — the price shown is for {$altModel['name']}.";
+            $input['model'] = $alt;
+            if (! in_array($input['resolution'], $altModel['resolutions'], true)) {
+                $input['resolution'] = end($altModel['resolutions']);
+            }
+            if (! in_array($input['aspect_ratio'], $altModel['aspect_ratios'], true)) {
+                [$w, $h] = $this->catalog->size($input['aspect_ratio'], '720p');
+                $input['aspect_ratio'] = $w > $h ? '16:9' : ($w < $h ? '9:16' : '1:1');
+            }
+            $model = $altModel;
         }
         foreach (['resolution' => 'resolutions', 'aspect_ratio' => 'aspect_ratios'] as $field => $list) {
             if (! in_array($input[$field], $model[$list], true)) {
@@ -187,6 +214,7 @@ class VideoStudioService
         }
 
         $storyboard['seed'] = random_int(1, 2_000_000_000);
+        $storyboard['notice'] = $notice;
         $multiplier = $this->multiplierFor($company, $project->model);
         $refCount = count($project->references ?? []);
 
@@ -225,7 +253,8 @@ class VideoStudioService
             throw new RuntimeException('This shot is already rendering or rendered.');
         }
 
-        $shot->update(['description' => $description]);
+        // A painted opening frame belongs to the old description.
+        $shot->update(['description' => $description, 'keyframe_path' => null, 'keyframe_cost' => null]);
 
         return $shot;
     }
@@ -365,20 +394,24 @@ class VideoStudioService
 
         $inFlight = $project->shots()->where('status', 'submitted')->count();
         $slots = max(0, (int) config('pingly.video.parallel_shots') - $inFlight);
+        if ($this->usesKeyframes($project)) {
+            // Each submit first paints a keyframe (up to ~1 min) — keep one tick short.
+            $slots = min($slots, 2);
+        }
 
         // With no uploaded references, shot 1 is rendered alone first and a
         // still of its main character becomes the reference for every
         // other shot — the difference between one actor and eight
         // lookalikes. Only possible when ffmpeg is there to pull the still.
         // anchor_path: null = not pulled yet, '' = tried and gave up, path = ready.
-        $needsAnchor = empty($project->references) && $project->anchor_path === null
+        $needsAnchor = ! $this->usesKeyframes($project) && empty($project->references) && $project->anchor_path === null
             && $project->shots()->count() > 1 && $this->stitcher->available();
 
         if ($needsAnchor && $project->shots()->where('position', 0)->where('status', '!=', 'completed')->exists()) {
             $slots = $project->shots()->where('position', 0)->where('status', 'pending')->exists() ? min($slots, 1) : 0;
         }
 
-        $pending = $project->shots()->where('status', 'pending')->limit($slots)->get();
+        $pending = $project->shots()->where('status', 'pending')->orderBy('position')->limit($slots)->get();
 
         foreach ($pending as $shot) {
             $this->submit($project, $shot);
@@ -398,15 +431,52 @@ class VideoStudioService
         ]);
 
         $references = $project->references ?? [];
-        $images = collect($references)->map(fn ($r) => $this->dataUrl($r['path']));
-        $hasAnchor = $project->anchor_path && $shot->position > 0;
-        if ($hasAnchor) {
-            $images->push($this->dataUrl($project->anchor_path));
+
+        if ($this->usesKeyframes($project)) {
+            try {
+                $frame = $this->keyframeFor($project, $shot, $planned);
+            } catch (RuntimeException $e) {
+                $shot->update(['status' => 'failed', 'error' => $e->getMessage()]);
+                $this->fail($project, 'Shot '.($shot->position + 1)."'s opening frame couldn't be painted — {$e->getMessage()} Edit the shot and resume.");
+
+                return;
+            }
+            $prompt = $this->director->composePrompt($storyboard, $planned, $shot->position, $project->shots()->count(), 0, false)
+                ."\nStart exactly from the given first frame: same people, faces, clothes, products and setting; animate it as described.";
+            $body = [
+                'model' => $project->model,
+                'prompt' => $prompt,
+                'duration' => $shot->duration,
+                'resolution' => $project->resolution,
+                'aspect_ratio' => $project->aspect_ratio,
+                'generate_audio' => $project->generate_audio,
+                'frame_images' => [['type' => 'image_url', 'image_url' => ['url' => $this->dataUrl($frame)], 'frame_type' => 'first_frame']],
+            ];
+        } else {
+            $images = collect($references)->map(fn ($r) => $this->dataUrl($r['path']));
+            $hasAnchor = $project->anchor_path && $shot->position > 0;
+            if ($hasAnchor) {
+                $images->push($this->dataUrl($project->anchor_path));
+            }
+
+            $prompt = $this->director->composePrompt($storyboard, $planned, $shot->position, $project->shots()->count(), count($references), (bool) $hasAnchor);
+            $body = $this->referenceBody($project, $storyboard, $shot, $prompt, $images->all());
         }
 
-        $prompt = $this->director->composePrompt($storyboard, $planned, $shot->position, $project->shots()->count(), count($references), (bool) $hasAnchor);
+        $shot->update(['rendered_prompt' => $prompt, 'attempts' => $shot->attempts + 1]);
 
-        $body = array_filter([
+        $this->send($project, $shot, $body);
+    }
+
+    /**
+     * @param  array<int, string>  $images  data: URLs
+     * @return array<string, mixed>
+     */
+    private function referenceBody(VideoProject $project, array $storyboard, VideoShot $shot, string $prompt, array $images): array
+    {
+        $images = collect($images);
+
+        return array_filter([
             'model' => $project->model,
             'prompt' => $prompt,
             'duration' => $shot->duration,
@@ -418,9 +488,68 @@ class VideoStudioService
             'seed' => $storyboard['seed'] ?? null,
             'input_references' => $images->map(fn ($url) => ['type' => 'image_url', 'image_url' => ['url' => $url]])->values()->all() ?: null,
         ], fn ($v) => $v !== null);
+    }
 
-        $shot->update(['rendered_prompt' => $prompt, 'attempts' => $shot->attempts + 1]);
+    /**
+     * Paint (once) the still a keyframe model animates from. The client's
+     * photos are the references; with none, shot 1's frame is the reference
+     * for every later shot — the job the ffmpeg anchor does for
+     * reference-based models.
+     *
+     * @param  array<string, mixed>  $planned
+     */
+    private function keyframeFor(VideoProject $project, VideoShot $shot, array $planned): string
+    {
+        if ($shot->keyframe_path && Storage::disk('local')->exists($shot->keyframe_path)) {
+            return $shot->keyframe_path;
+        }
 
+        $refs = collect($project->references ?? [])->values();
+        $images = $refs->map(fn ($r) => $this->dataUrl($r['path']))->all();
+        $fromFirstShot = false;
+        if (! $images && $shot->position > 0) {
+            $first = $project->shots()->where('position', 0)->value('keyframe_path');
+            if ($first && Storage::disk('local')->exists($first)) {
+                $images[] = $this->dataUrl($first);
+                $fromFirstShot = true;
+            }
+        }
+
+        $board = $project->storyboard ?? [];
+        $lines = ["Paint the opening frame of one shot of a professional ad film, as a single photorealistic film still (aspect ratio {$project->aspect_ratio})."];
+        if (! empty($board['style_bible'])) {
+            $lines[] = 'Look of the film: '.(is_string($board['style_bible']) ? $board['style_bible'] : json_encode($board['style_bible'], JSON_UNESCAPED_UNICODE));
+        }
+        $lines[] = 'This shot: '.$planned['description'];
+        if ($refs->isNotEmpty()) {
+            $lines[] = "The attached images are the client's real references:";
+            foreach ($refs as $i => $r) {
+                $lines[] = 'Image '.($i + 1).": {$r['role']} — {$r['label']}";
+            }
+            $lines[] = 'Keep every person exactly the same person — same face, features, skin tone and hair — and every product exactly as it is.';
+        } elseif ($fromFirstShot) {
+            $lines[] = 'The attached image is the first shot of this film — keep the same people, wardrobe and look.';
+        }
+        $lines[] = 'No text, captions or watermarks.';
+
+        $aspect = in_array($project->aspect_ratio, ['16:9', '9:16', '1:1'], true) ? $project->aspect_ratio : '16:9';
+        $rendered = app(ImageStudioService::class)->render(VideoModelCatalog::KEYFRAME_IMAGE_MODEL, implode("\n", $lines), $images, $aspect);
+
+        $path = $project->storageDir().sprintf('/keyframe_%03d.%s', $shot->position, $rendered['ext']);
+        Storage::disk('local')->put($path, $rendered['bytes']);
+        $shot->update(['keyframe_path' => $path, 'keyframe_cost' => $rendered['cost']]);
+
+        return $path;
+    }
+
+    private function usesKeyframes(VideoProject $project): bool
+    {
+        return ($this->catalog->get($project->model)['conditioning'] ?? null) === 'keyframe';
+    }
+
+    /** @param  array<string, mixed>  $body */
+    private function send(VideoProject $project, VideoShot $shot, array $body): void
+    {
         try {
             $response = $this->http(60)->post(config('pingly.ai.openrouter_api_base').'/videos', $body);
         } catch (ConnectionException $e) {
@@ -437,7 +566,11 @@ class VideoStudioService
             // filter) — resubmitting the same thing won't change the answer.
             if ($response->status() >= 400 && $response->status() < 500 && $response->status() !== 429) {
                 $shot->update(['status' => 'failed', 'error' => 'Rejected by the render service.']);
-                $this->fail($project, 'Shot '.($shot->position + 1).' was rejected — it may have tripped the content filter. Edit it and resume.');
+                $hasPerson = collect($project->references ?? [])->contains(fn ($r) => $r['role'] === 'character');
+                $hint = $hasPerson && ($this->catalog->get($project->model)['blocks_real_faces'] ?? false)
+                    ? ' If a reference is a photo of a real person, start a new video and tick "Real person" on it — that uses Kling 3.0 Pro, which accepts real faces.'
+                    : '';
+                $this->fail($project, 'Shot '.($shot->position + 1).' was rejected — it may have tripped the content filter. Edit it and resume.'.$hint);
 
                 return;
             }
@@ -477,11 +610,14 @@ class VideoStudioService
             if ($shot->status === 'completed') {
                 return;
             }
-            $this->billShot($project, $shot, (float) ($job['usage']['cost'] ?? 0));
+            // A painted keyframe is part of this shot's cost; with no reported
+            // video cost at all, billShot falls back to the quote.
+            $videoCost = (float) ($job['usage']['cost'] ?? 0);
+            $this->billShot($project, $shot, $videoCost > 0 ? $videoCost + (float) $shot->keyframe_cost : 0.0);
             $shot->update(['status' => 'completed', 'file_path' => $path, 'error' => null]);
         });
 
-        if ($shot->position === 0 && empty($project->references) && $project->anchor_path === null && $this->stitcher->available()) {
+        if ($shot->position === 0 && ! $this->usesKeyframes($project) && empty($project->references) && $project->anchor_path === null && $this->stitcher->available()) {
             try {
                 $anchor = $project->storageDir().'/anchor.jpg';
                 $this->stitcher->still($absolute, Storage::disk('local')->path($anchor), max(0.5, $shot->duration * 0.4));
@@ -623,7 +759,7 @@ class VideoStudioService
 
             $path = $project->storageDir().sprintf('/ref_%02d.%s', $i + 1, $m[1] === 'jpeg' ? 'jpg' : $m[1]);
             Storage::disk('local')->put($path, $bytes);
-            $stored[] = ['path' => $path, 'label' => Str::limit(trim($ref['label']), 60, ''), 'role' => $ref['role']];
+            $stored[] = ['path' => $path, 'label' => Str::limit(trim($ref['label']), 60, ''), 'role' => $ref['role'], 'real_person' => ! empty($ref['real_person'])];
         }
 
         return $stored;
