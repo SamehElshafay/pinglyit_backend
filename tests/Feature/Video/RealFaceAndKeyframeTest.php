@@ -9,6 +9,7 @@ use App\Models\UsageEvent;
 use App\Models\User;
 use App\Models\VideoProject;
 use App\Services\Auth\JwtService;
+use App\Services\Video\VideoDirector;
 use App\Services\Video\VideoStitcher;
 use App\Services\Video\VideoStudioService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -142,5 +143,25 @@ class RealFaceAndKeyframeTest extends TestCase
         $this->withToken($this->token)->putJson("/api/services/video/projects/{$project['id']}/shots/{$shot->id}", ['description' => 'Hassan hands a customer a fresh loaf.'])->assertOk();
 
         $this->assertNull($shot->fresh()->keyframe_path);
+    }
+
+    public function test_the_director_sees_the_product_photos_and_the_prompt_protects_their_print(): void
+    {
+        Http::fake(['*/videos/models' => Http::response(['data' => []])]);
+        $this->withToken($this->token)->postJson('/api/services/video/projects', [
+            'prompt' => 'Four hoodies fly out of a tote bag and land on the pavement.',
+            'model' => 'bytedance/seedance-2.0', 'resolution' => '720p', 'aspect_ratio' => '9:16', 'duration' => 8,
+            'references' => [['data' => 'data:image/png;base64,'.self::PNG, 'label' => 'WhatsApp Image 2026', 'role' => 'product']],
+        ])->assertCreated();
+
+        // The planner got the actual image, not just its file name.
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/chat/completions') && ! isset($r['modalities'])
+            && is_array($r['messages'][1]['content'])
+            && collect($r['messages'][1]['content'])->contains(fn ($part) => ($part['type'] ?? null) === 'image_url'));
+
+        $board = ['style_bible' => 'x', 'characters' => [], 'products' => [['id' => 'P1', 'kind' => 'product', 'name' => 'Hoodie', 'reference' => 1, 'description' => 'Brown hoodie with a back print.']]];
+        $prompt = app(VideoDirector::class)->composePrompt($board, ['description' => 'It flies.', 'duration' => 8, 'products' => ['P1']], 0, 1, 1, false);
+        $this->assertStringContainsString('same print, graphic, text and logo', $prompt);
+        $this->assertStringNotContainsString('skin tone, hair and proportions', $prompt);
     }
 }

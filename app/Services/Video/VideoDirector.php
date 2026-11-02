@@ -4,6 +4,7 @@ namespace App\Services\Video;
 
 use App\Models\Company;
 use App\Services\Ai\AiGatewayService;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 /**
@@ -78,9 +79,21 @@ class VideoDirector
         {$styleLine}
         TXT;
 
+        // The director must SEE the photos: from file names alone it invents
+        // products ("a plain yellow hoodie") and the video model then follows
+        // that invented text instead of the client's actual print.
+        $content = [['type' => 'text', 'text' => $user]];
+        foreach (array_values($references) as $i => $r) {
+            if (! empty($r['path']) && Storage::disk('local')->exists($r['path'])) {
+                $disk = Storage::disk('local');
+                $content[] = ['type' => 'text', 'text' => 'Reference image '.($i + 1).':'];
+                $content[] = ['type' => 'image_url', 'image_url' => ['url' => 'data:'.($disk->mimeType($r['path']) ?: 'image/jpeg').';base64,'.base64_encode($disk->get($r['path']))]];
+            }
+        }
+
         $response = $this->ai->forward($company, (string) config('pingly.video.director_model'), [
             ['role' => 'system', 'content' => $this->systemPrompt()],
-            ['role' => 'user', 'content' => $user],
+            ['role' => 'user', 'content' => count($content) > 1 ? $content : $user],
         ], ['max_tokens' => 8000]);
 
         $storyboard = $this->parse($response['choices'][0]['message']['content'] ?? '');
@@ -106,7 +119,9 @@ class VideoDirector
 
         foreach ($present as $entity) {
             $ref = $entity['reference'] ?? null;
-            $refText = $ref ? " Must match reference image {$ref} exactly — same face, features, skin tone, hair and proportions." : '';
+            $refText = ! $ref ? '' : (($entity['kind'] ?? 'character') === 'character'
+                ? " Must match reference image {$ref} exactly — same face, features, skin tone, hair and proportions."
+                : " Must match reference image {$ref} exactly — same colour, cut, fabric, and the same print, graphic, text and logo in the same place (front or back). Do not simplify or replace the design.");
             if (! $ref && $hasAnchor && ($entity['kind'] ?? 'character') === 'character') {
                 $refText = ' Same person as in reference image '.($referenceCount + 1).' — identical face and wardrobe.';
             }
@@ -167,6 +182,7 @@ class VideoDirector
         - A real story arc even for an ad: hook in the first 2 seconds, development, payoff, and a final hero shot of the product or brand moment.
         - Vary shot sizes like an editor would (wide establishing, medium, close-up, insert/macro) and keep screen direction consistent between cuts.
         - Reference images: when the client supplied one for a person, product or logo, set "reference" to its number (1-based) and write the description to agree with it. A reference may only be assigned to one character or product.
+        - The reference images are attached. Describe each product EXACTLY as you see it: its real colour, cut, and every print, graphic, illustration, text and logo, and where it sits (front, back, sleeve). Never invent colours or designs, and never write "no graphics" when there is one. If a product photo shows a model wearing it, the product is the garment — not the model; don't turn the model into a character unless the brief asks for them. When the design is on the back, plan shots so the back is seen (e.g. a garment landing face-down, or turning in the air).
         - Never ask the model to render written text, Arabic or English — AI video garbles letters. Signs, packaging text and logos must come from a reference image or stay out of frame. No end cards; the brand adds those in editing.
         - Locations, people, wardrobe and behaviour must feel authentic to Egypt / the Gulf when the brief is set there: real Cairo, Alexandria, Riyadh or Dubai textures, not generic Western stock. Wardrobe and conduct appropriate for a mainstream family audience in the region.
         - Dialogue only if a spoken language is given; keep lines short and natural, written in the language and script requested. Otherwise "dialogue": [] and "voiceover": null.

@@ -210,6 +210,10 @@ class VideoStudioService
         } catch (Throwable $e) {
             $this->deleteProject($project);
 
+            if (! $e instanceof RuntimeException) {
+                report($e); // a bug, not a refusal — keep it in the log
+            }
+
             throw $e instanceof RuntimeException ? $e : new RuntimeException('Could not plan this video — try again.');
         }
 
