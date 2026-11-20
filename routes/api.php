@@ -241,6 +241,7 @@ Route::prefix('admin')->group(function () {
 
         Route::get('/clients', [ClientController::class, 'index']);
         Route::get('/clients/{company}', [ClientController::class, 'show']);
+        Route::delete('/clients/{company}', [ClientController::class, 'destroy']);
         Route::get('/clients/{company}/api-keys', [ClientController::class, 'apiKeys']);
         Route::put('/clients/{company}/whatsapp-config', [ClientController::class, 'updateWhatsappConfig']);
         Route::post('/clients/{company}/whatsapp-account', [ClientController::class, 'connectWhatsappAccount']);

@@ -12,6 +12,7 @@ use App\Services\Billing\ServiceConfigRepository;
 use App\Services\Video\VideoStudioService;
 use App\Services\WhatsApp\WhatsAppGatewayService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ClientController extends Controller
@@ -68,6 +69,35 @@ class ClientController extends Controller
             ],
             'video' => $this->videoState($company),
         ]);
+    }
+
+    /**
+     * Delete a client for good: its wallet, keys, usage, projects and
+     * everything else hanging off the company (all cascade), plus its user
+     * accounts so nobody can sign in to an empty shell. The request has to
+     * repeat the company's name, so a stray click can't do it.
+     */
+    public function destroy(Request $request, Company $company)
+    {
+        $request->validate(['confirm_name' => ['required', 'string']]);
+        if (trim($request->input('confirm_name')) !== trim($company->name)) {
+            throw ValidationException::withMessages(['confirm_name' => 'Type the company name exactly to confirm.']);
+        }
+
+        $company->load('wallet');
+        $summary = sprintf('Deleted client "%s" (#%d) with a balance of $%s', $company->name, $company->id, number_format((float) ($company->wallet->balance ?? 0), 2));
+
+        DB::transaction(function () use ($request, $company, $summary) {
+            AuditLog::record($request->user(), 'client.destroy', $summary, null, [
+                'company_id' => $company->id,
+                'email' => $company->contact_email,
+                'balance' => (float) ($company->wallet->balance ?? 0),
+            ]);
+            $company->users()->delete();
+            $company->delete();
+        });
+
+        return response()->noContent();
     }
 
     /**

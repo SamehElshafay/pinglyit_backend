@@ -133,6 +133,32 @@ class BillingEngine
     }
 
     /**
+     * Set a wallet to an exact balance. Recorded like any other manual
+     * adjustment (the difference, signed), so the audit trail still adds up;
+     * the difference is worked out under the row lock, so a charge landing at
+     * the same moment can't be lost. Returns null when the balance already
+     * equals the target.
+     */
+    public function setWalletBalance(Company $company, AdminUser $admin, float $target, string $reason): ?WalletAdjustment
+    {
+        return DB::transaction(function () use ($company, $admin, $target, $reason) {
+            $wallet = $company->wallet()->lockForUpdate()->firstOrFail();
+            $difference = round($target - (float) $wallet->balance, 4);
+            if ($difference == 0.0) {
+                return null;
+            }
+            $wallet->increment('balance', $difference);
+
+            return WalletAdjustment::create([
+                'company_id' => $company->id,
+                'admin_user_id' => $admin->id,
+                'amount' => $difference,
+                'reason' => sprintf('Balance set to $%s — %s', number_format($target, 2), $reason),
+            ]);
+        });
+    }
+
+    /**
      * Record a top-up as pending *before* the charge happens, with an
      * amount Pingly itself decided (not anything a gateway will later
      * report). Exists because a gateway's webhook can't be fully trusted to
